@@ -301,7 +301,7 @@ def generate_all_legal_move_vocab() -> dict[str, int]:
     return move_dict
 
 
-def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv"):
+def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", batch_size: int = 128):
     '''
     Function to create dataloaders for training, validation and testing for chess, given a CSV file with this format:
     FEN,Move,Evaluation
@@ -312,10 +312,10 @@ def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv"):
     At the end I decided to return evene the result of generate_all_legal_move_vocab, dosen't have any sense to generate, destroy it and regenerate again.
     '''
     # Modifica della sezione di creazione dei dataset
-    BATCH_SIZE = 128
+    BATCH_SIZE = batch_size
     CSV_FILE = name_file
 
-    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.deterministic = False
     torch.backends.cudnn.benchmark = False
 
     g = torch.Generator()
