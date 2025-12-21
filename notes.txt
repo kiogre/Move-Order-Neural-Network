@@ -1,0 +1,2 @@
+There is a problem for now, the data I have don't have the order of moves I have to choose, so I have to change and have all the possible moves, in the right order.
+It doesn't need such thing, he should be able to sort from just knowing the best move.

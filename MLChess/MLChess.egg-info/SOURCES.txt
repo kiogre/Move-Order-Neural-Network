@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+MLChess/__init__.py
+MLChess/data_organization_tensor.py
+MLChess/my_resnet.py
+MLChess.egg-info/PKG-INFO
+MLChess.egg-info/SOURCES.txt
+MLChess.egg-info/dependency_links.txt
+MLChess.egg-info/top_level.txt
