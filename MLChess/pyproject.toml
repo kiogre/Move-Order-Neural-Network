@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "MLChess"
-version = "0.1.5"
+version = "0.2.0"
 description = "Some functions and classes useful for machine learning in the case of chess"
 authors = [{ name="Marco", email="marcochiorri2003@gmail.com" }]
 readme = "README.md"

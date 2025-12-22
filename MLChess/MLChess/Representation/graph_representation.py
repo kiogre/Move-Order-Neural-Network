@@ -7,14 +7,54 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+## HAVE TO UPDATE NEW IMPLEMENTATION GRAPH WITH THE MOVE
+## HAVE TO UPDATE IMPLEMENTATION TENSOR WITH DIFFERENT KIND MOVE, BUT THIS MUCH LATER
+
+def precompute_queen_knight_edges():
+        edges = []
+
+        for sq in chess.SQUARES:
+            # mosse da cavallo
+            for target in chess.SquareSet(chess.BB_KNIGHT_ATTACKS[sq]):
+                edges.append((sq, target))
+
+            # mosse da regina (rook + bishop)
+            for target in chess.SquareSet(chess.BB_QUEEN_ATTACKS[sq]):
+                edges.append((sq, target))
+
+        edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
+        return edge_index
+
+
+def move_to_edge(move_uci: str):
+    from_sq = chess.parse_square(move_uci[:2])
+    to_sq = chess.parse_square(move_uci[2:4])
+    return from_sq, to_sq
+
+
 class ChessPositionGraph:
-    """Converte FEN in grafo usando archi fissi pre-calcolati"""
-    
-    def __init__(self):
+    """
+    Most importante thing: this is just 64 nodes, but the arch can be modified: or only possible moves
+    or all the moves, just the parameter minimal arch
+    """
+
+    def __init__(self, legal_move_graph: bool = False):
         self.piece_type_map = {
             'P': 0, 'N': 1, 'B': 2, 'R': 3, 'Q': 4, 'K': 5,
             'p': 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11
         }
+        self.piece_value_map = {
+            'P': 0.1,  'N': 0.325, 'B': 0.3, 'R': 0.5, 'Q': 0.9, 'K': 1.0,
+            'p': -0.1, 'n': -0.325,'b': -0.3,'r': -0.5,'q': -0.9,'k': -1.0
+        }
+        self.edge_index = precompute_queen_knight_edges()
+        self.minimal = legal_move_graph
+        self.edge_to_index = {
+            (src, dst): i
+            for i, (src, dst) in enumerate(self.edge_index.t().tolist())
+        }
+
+
     
     def fen_to_graph(self, fen_string: str, evaluation: str, max_evaluation: int = 1000) -> Data:
         """Converte FEN in grafo"""
@@ -41,16 +81,31 @@ class ChessPositionGraph:
                 piece_features = [0] * 12
                 piece_features[self.piece_type_map[piece.symbol()]] = 1
                 color_feature = 1.0 if piece.color == chess.WHITE else -1.0
-                node_features.append(piece_features + [color_feature])
+                node_features.append(piece_features + [(square % 8)/7.0] + [(square // 8)/7.0] + [self.piece_value_map[piece.symbol()]])
             else:
-                node_features.append([0] * 12 + [0.0])
+                node_features.append([0] * 12 + [(square % 8)/7.0] + [(square // 8)/7.0] + [0])
 
         # 3. Gestione degli archi
-        edge_index = []
-        for move in board.legal_moves:
-            edge_index.append([move.from_square, move.to_square])
-        
-        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        if self.minimal:
+            edge_index = []
+            for move in board.legal_moves:
+                edge_index.append([move.from_square, move.to_square])
+            
+            edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        else:
+            edge_index = self.edge_index
+
+        policy_target = torch.zeros(self.edge_index.size(1), dtype=torch.float)
+
+        if move is not None:
+            try:
+                src, dst = move_to_edge(move)
+                edge_idx = self.edge_to_index.get((src, dst), None)
+                if edge_idx is not None:
+                    policy_target[edge_idx] = 1.0
+            except:
+                pass
+
         
         x = torch.tensor(node_features, dtype=torch.float)
         y = torch.tensor([eval_value], dtype=torch.float)
@@ -79,12 +134,16 @@ class ChessPositionGraph:
             x=x,        # [64, 13] - una riga per casella
             edge_index=edge_index,
             global_features=global_features_tensor,
-            y=y
+            y=y,
+            y_policy=policy_target      # mossa migliore
         )
     
 
 class CSVChessDataset:
-    """Dataset che legge CSV a chunks con supporto per divisione train/test"""
+    """Dataset che legge CSV a chunks con supporto per divisione train/test
+    The representation of the chessboard can be implemented in different ways, sot can be done by 
+    changing parameter representation
+    """
     
     def __init__(self, csv_file: str, batch_size: int = 64, max_evaluation: int = 1000, 
                  indices: Set[int] = None, representation = ChessPositionGraph()):
@@ -112,7 +171,7 @@ class CSVChessDataset:
         for chunk_df in pd.read_csv(self.csv_file, chunksize=chunk_size):
             chunk_graphs = []
             
-            for local_idx, (_, row) in enumerate(chunk_df.iterrows()):
+            for local_idx, row in enumerate(chunk_df.itertuples(index=False)):
                 current_row_index = row_index + local_idx
                 
                 # Se abbiamo indici specifici, controlla se questo indice è incluso
@@ -120,8 +179,8 @@ class CSVChessDataset:
                     continue
                 
                 try:
-                    fen_string = row['FEN']
-                    evaluation = str(row['Evaluation'])
+                    fen_string = row.FEN
+                    evaluation = row.Evaluation
                     graph_data = self.graph_converter.fen_to_graph(
                         fen_string, evaluation, self.max_evaluation
                     )
@@ -176,7 +235,18 @@ def dataset_creation_graph(csv_file: str = "over_mate_1_tactic_evals.csv", val_s
     I'm not sure about how good it is, I should check the code again to be sure it isn't something really bad.
     Or if I can use some other thing.
     It doesn't work exactly like a dataloader.
-    If I want to check again how I worked with it, I should go to the folder ChessNN and look at the .ipynb where I work with GNN
+    If I want to check again how I worked with it, I should go to the folder ChessNN and look at the .ipynb where I work with GNN.
+    
+    Can be set different kinds of representations, just modifiyng the parameter representation into a new class
+    IMPORTANT: THE NEW IMPLEMENTATION SHOULD HAVE A FUNCTION CALLED fen_to_graph() THAT TAKES A STRING (FEN),
+    VALUE OF THE POSITION AND A MAXIMUM VALUE THAT THE POSITION CAN ASSUME (DIFFERENT FROM 0)
+    THE OUTPUT OF THIS FUNCTION IS: Data(
+            x=x,        # [64, 13] - una riga per casella
+            edge_index=edge_index,
+            global_features=global_features_tensor,
+            y=y
+        )
+    WHERE DATA IS FROM torch_geometric
     """
     train_indices, val_indices, test_indices = create_train_test_split(
         csv_file, test_size, val_size
