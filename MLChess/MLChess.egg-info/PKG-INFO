@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: MLChess
-Version: 0.1.5
+Version: 0.2.4
 Summary: Some functions and classes useful for machine learning in the case of chess
 Author-email: Marco <marcochiorri2003@gmail.com>
 Requires-Python: >=3.13
