@@ -17,14 +17,30 @@ def precompute_queen_knight_edges():
     edges = []
 
     for sq in chess.SQUARES:
-        # Mosse cavallo
-        for dst in chess.SquareSet(chess.BB_KNIGHT_ATTACKS[sq]):
-            edges.append([sq, dst])
+        rank = chess.square_rank(sq)
+        file = chess.square_file(sq)
 
-        # Mosse regina
-        # calcola attacchi come combinazione di torre + alfiere
-        for dst in chess.SquareSet(BB_ROOK_ATTACKS[sq] | BB_BISHOP_ATTACKS[sq]):
-            edges.append([sq, dst])
+        # ---- KNIGHT ----
+        for d_rank, d_file in [
+            (2, 1), (1, 2), (-1, 2), (-2, 1),
+            (-2, -1), (-1, -2), (1, -2), (2, -1)
+        ]:
+            r, f = rank + d_rank, file + d_file
+            if 0 <= r < 8 and 0 <= f < 8:
+                edges.append([sq, chess.square(f, r)])
+
+        # ---- QUEEN ----
+        directions = [
+            (1, 0), (-1, 0), (0, 1), (0, -1),
+            (1, 1), (1, -1), (-1, 1), (-1, -1)
+        ]
+
+        for d_rank, d_file in directions:
+            r, f = rank + d_rank, file + d_file
+            while 0 <= r < 8 and 0 <= f < 8:
+                edges.append([sq, chess.square(f, r)])
+                r += d_rank
+                f += d_file
 
     return torch.tensor(edges, dtype=torch.long).t().contiguous()
 
@@ -59,7 +75,7 @@ class ChessPositionGraph:
 
 
     
-    def fen_to_graph(self, fen_string: str, evaluation: str, max_evaluation: int = 1000) -> Data:
+    def fen_to_graph(self, fen_string: str, evaluation: str, best_move, max_evaluation: int = 1000) -> Data:
         """Converte FEN in grafo"""
         
         # 1. Gestione valutazione
@@ -114,9 +130,9 @@ class ChessPositionGraph:
 
         policy_target = torch.zeros(self.edge_index.size(1), dtype=torch.float)
 
-        if move is not None:
+        if best_move is not None:
             try:
-                src, dst = move_to_edge(move)
+                src, dst = move_to_edge(best_move)
                 edge_idx = self.edge_to_index.get((src, dst), None)
                 if edge_idx is not None:
                     policy_target[edge_idx] = 1.0
@@ -200,8 +216,9 @@ class CSVChessDataset:
                 try:
                     fen_string = row.FEN
                     evaluation = row.Evaluation
+                    best_move = row.Move
                     graph_data = self.graph_converter.fen_to_graph(
-                        fen_string, evaluation, self.max_evaluation
+                        fen_string, evaluation, best_move, self.max_evaluation
                     )
                     chunk_graphs.append(graph_data)
                 except Exception as e:

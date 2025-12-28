@@ -9,3 +9,4 @@ MLChess/Models/graph_models.py
 MLChess/Models/my_resnet.py
 MLChess/Representation/data_organization_tensor.py
 MLChess/Representation/graph_representation.py
+MLChess/Understanding/Chess_GCN_Explainer.py
