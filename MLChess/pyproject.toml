@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "torch>=2.8.0", "torchvision>=0.23.0", "pandas>=2.3.2", "chess>=1.11.2", "torch-geometric>=2.6.1", "numpy>=2.1.2", "scikit-learn>=1.7.1", "matplotlib>=3.10.6", "cairosvg>=2.8.2"]
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,3 +9,6 @@ description = "Some functions and classes useful for machine learning in the cas
 authors = [{ name="Marco", email="marcochiorri2003@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.13"
+dependencies = ["torch>=2.8.0", "torchvision>=0.23.0", "pandas>=2.3.2", "chess>=1.11.2", 
+"torch-geometric>=2.6.1", "numpy>=2.1.2", "scikit-learn>=1.7.1", "matplotlib>=3.10.6", "cairosvg>=2.8.2", 
+"tqdm>=4.67.1", "multiprocess>=0.70.12.2"]

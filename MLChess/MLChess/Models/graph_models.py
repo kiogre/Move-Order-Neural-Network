@@ -2,6 +2,7 @@ from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, globa
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+from .MPNN import ChessMPNN
 
 class ChessGCN(nn.Module):
     def __init__(self, input_dim=13, hidden_dim=256, global_dim = 7):  # Più largo
@@ -152,7 +153,7 @@ class GraphAndPoolingChessGCN(nn.Module):
             batch_size = 1
         else:
             batch_size = batch.max().item() + 1
-            
+
         if global_features.dim() == 1:
             # Se è un vettore lungo, reshapa
             global_features = global_features.view(batch_size, self.global_dim)
@@ -166,9 +167,9 @@ class GraphAndPoolingChessGCN(nn.Module):
         graph = x
         
         # Graph-level pooling
-        x_mean = global_mean_pool(x, batch)
-        x_max = global_max_pool(x, batch)
-        x_add = global_add_pool(x, batch)
+        x_mean = global_mean_pool(x, batch, size=batch_size)
+        x_max = global_max_pool(x, batch, size=batch_size)
+        x_add = global_add_pool(x, batch, size=batch_size)
         node_repr = torch.cat([x_mean, x_max, x_add], dim=1)
         
         # Global features processing
@@ -179,3 +180,62 @@ class GraphAndPoolingChessGCN(nn.Module):
         
         return graph, combined
     
+
+class GraphAndPoolingChessMPNN(nn.Module):
+    """
+    This class is just some GCN layer for be used again just in case to use again, I can just call this
+    class, the return is the tensor of informations (combined after all the pools...)
+    REMEMBER, self.combined_dim = hidden_dim*3 + hidden_dim //2, TO KNOW HOW BIG IT IS THE COMBINED INFORMATIONS
+    """
+    def __init__(self, input_dim=15, hidden_dim=256, global_dim = 7, edge_attr = 4):  # Più largo
+        """
+        This class is just some GCN layer for be used again just in case to use again, I can just call this
+        class, the return is the tensor of informations (combined after all the pools...)
+        REMEMBER, self.combined_dim = hidden_dim*3 + hidden_dim //2, TO KNOW HOW BIG IT IS THE COMBINED INFORMATIONS
+        """
+        super().__init__()
+        self.global_dim = global_dim
+        
+        self.input_proj = nn.Linear(input_dim, hidden_dim)
+        self.conv1 = ChessMPNN(hidden_dim, edge_attr, hidden_dim)
+        self.conv2 = ChessMPNN(hidden_dim, edge_attr, hidden_dim)
+        self.conv3 = ChessMPNN(hidden_dim, edge_attr, hidden_dim)
+        
+        self.global_fc = nn.Linear(global_dim, hidden_dim // 2)
+
+        self.combined_dim = hidden_dim*2 + hidden_dim//2
+
+        
+    def forward(self, x, edge_index, edge_attr, batch, global_features):
+        if batch.numel() == 0:
+            batch_size = 1
+        else:
+            batch_size = batch.max().item() + 1
+
+        if global_features.dim() == 1:
+            # Se è un vettore lungo, reshapa
+            global_features = global_features.view(batch_size, self.global_dim)
+        # Node features
+        x = F.relu(self.input_proj(x))
+        x = self.conv1(x, edge_index, edge_attr)
+        x = F.relu(x)
+        x = self.conv2(x, edge_index, edge_attr)
+        x = F.relu(x)
+        x = self.conv3(x, edge_index, edge_attr)
+        x = F.relu(x)
+
+        graph = x
+        
+        # Graph-level pooling
+        x_mean = global_mean_pool(x, batch, size=batch_size)
+        x_max = global_max_pool(x, batch, size=batch_size)
+        x_add = global_add_pool(x, batch, size=batch_size)
+        node_repr = torch.cat([x_mean, x_max], dim=1)
+        
+        # Global features processing
+        global_repr = F.relu(self.global_fc(global_features))
+        
+        # Combina node + global representations
+        combined = torch.cat([node_repr, global_repr], dim=1)
+        
+        return graph, combined

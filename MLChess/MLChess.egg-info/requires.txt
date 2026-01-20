@@ -1,0 +1,11 @@
+torch>=2.8.0
+torchvision>=0.23.0
+pandas>=2.3.2
+chess>=1.11.2
+torch-geometric>=2.6.1
+numpy>=2.1.2
+scikit-learn>=1.7.1
+matplotlib>=3.10.6
+cairosvg>=2.8.2
+tqdm>=4.67.1
+multiprocess>=0.70.12.2

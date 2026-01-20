@@ -5,6 +5,17 @@ Summary: Some functions and classes useful for machine learning in the case of c
 Author-email: Marco <marcochiorri2003@gmail.com>
 Requires-Python: >=3.13
 Description-Content-Type: text/markdown
+Requires-Dist: torch>=2.8.0
+Requires-Dist: torchvision>=0.23.0
+Requires-Dist: pandas>=2.3.2
+Requires-Dist: chess>=1.11.2
+Requires-Dist: torch-geometric>=2.6.1
+Requires-Dist: numpy>=2.1.2
+Requires-Dist: scikit-learn>=1.7.1
+Requires-Dist: matplotlib>=3.10.6
+Requires-Dist: cairosvg>=2.8.2
+Requires-Dist: tqdm>=4.67.1
+Requires-Dist: multiprocess>=0.70.12.2
 
 This python library is just for me, it is to create some structures for neural network
 This version will only have the tensor representation, in the future I'm going to add the graph representation and the Relation Graph representation
