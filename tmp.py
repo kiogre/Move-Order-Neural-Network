@@ -14,5 +14,5 @@ def load_checkpoint(path):
 resume_from = "./GCN/epoch_050.pt"  # o epoch_010.pt
 loaded_epoch = load_checkpoint(resume_from)
 
-resume_from = "./MPNN/best_model.pt"  # o epoch_010.pt
+resume_from = "./MPNN/epoch_110.pt"  # o epoch_010.pt
 loaded_epoch = load_checkpoint(resume_from)

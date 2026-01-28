@@ -43,7 +43,7 @@ class TestModelMPNN(nn.Module):
 # Carica il tuo modello
 model = TestModelMPNN(hidden_dim=256)
 
-checkpoint_load = torch.load('./MPNN/epoch_100.pt', weights_only=False)
+checkpoint_load = torch.load('./MPNN/best_model.pt', weights_only=False)
 model.load_state_dict(checkpoint_load["model_state"])
 
 # Crea explainer
