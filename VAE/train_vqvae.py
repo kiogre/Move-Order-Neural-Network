@@ -86,16 +86,22 @@ def codebook_perplexity(indices: torch.Tensor, num_embeddings: int) -> float:
 
 def piece_accuracy(x_recon: torch.Tensor, x_true: torch.Tensor) -> float:
     """
-    Accuracy pixel-level sui 12 piani pezzi.
-    Usa soglia 0.5 sulla sigmoid dell'output.
+    Accuracy casella per casella usando argmax categorico.
+    x_recon[:, :13] = logit categorici (0=vuoto, 1-12=pezzi)
+    x_true[:, :12]  = piani binari target
     """
-    pred  = (torch.sigmoid(x_recon[:, :12]) > 0.5).float()
-    truth = x_true[:, :12]
-    return (pred == truth).float().mean().item()
+    pred_idx   = x_recon[:, :13].argmax(dim=1)                    # (B, 8, 8)
+    piece_idx  = x_true[:, :12].argmax(dim=1) + 1                 # (B, 8, 8)
+    is_empty   = x_true[:, :12].sum(dim=1) == 0                   # (B, 8, 8)
+    target_idx = torch.where(is_empty,
+                             torch.zeros_like(piece_idx),
+                             piece_idx)
+    return (pred_idx == target_idx).float().mean().item()
 
 
 def turn_accuracy(x_recon: torch.Tensor, x_true: torch.Tensor) -> float:
-    pred  = (torch.sigmoid(x_recon[:, 12:13, 0, 0]) > 0.5).float()
+    # Piano 13 del decoder = turno
+    pred  = (torch.sigmoid(x_recon[:, 13:14, 0, 0]) > 0.5).float()
     truth = x_true[:, 12:13, 0, 0]
     return (pred == truth).float().mean().item()
 

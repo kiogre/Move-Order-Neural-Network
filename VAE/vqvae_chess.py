@@ -32,38 +32,40 @@ import torch.nn.functional as F
 # Focal Loss per piani binari sparsi
 # ─────────────────────────────────────────────
 
-class FocalLossPerPlane(nn.Module):
+class CategoricalBoardLoss(nn.Module):
     """
-    Focal Loss binaria applicata indipendentemente su ciascuno degli N_PIECE piani.
+    Cross-entropy categorica per la ricostruzione della scacchiera.
 
-    alpha : peso per la classe positiva (pezzo presente)
-            tipicamente alto (es. 0.85) perché gli 1 sono rari
-    gamma : focusing parameter (2.0 è il default classico)
+    Ogni casella è una classificazione a 13 classi:
+        classe 0   = casella vuota
+        classi 1-12 = i 12 tipi di pezzi (stessa mappatura del tensore input)
+
+    Questo garantisce strutturalmente che ogni casella abbia al massimo un pezzo,
+    eliminando il problema delle posizioni generate con pezzi sovrapposti.
+
+    empty_weight: peso della classe vuota (~97% delle caselle), deve essere basso
+                  per non far dominare la classe vuota nell'ottimizzazione.
     """
-    def __init__(self, alpha: float = 0.85, gamma: float = 2.0):
+    def __init__(self, empty_weight: float = 0.03):
         super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
+        self.empty_weight = empty_weight
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """
-        logits, targets: (B, 12, 8, 8)
-        Normalizzazione per piano: la loss di ogni piano è normalizzata
-        separatamente per il numero di celle positive/negative, così i piani
-        dei pezzi rari (donna, torre) non vengono schiacciati da quelli vuoti.
+        logits:  (B, 13, 8, 8)  — classe 0=vuoto, 1-12=pezzi
+        targets: (B, 12, 8, 8)  — piani binari originali (0=assente, 1=presente)
         """
-        p = torch.sigmoid(logits)
-        p = p.clamp(1e-6, 1 - 1e-6)
+        # Converte targets binari (B, 12, 8, 8) → indici categorici (B, 8, 8)
+        piece_idx  = targets.argmax(dim=1) + 1          # (B, 8, 8), valori 1-12
+        is_empty   = targets.sum(dim=1) == 0            # (B, 8, 8)
+        target_idx = torch.where(is_empty,
+                                 torch.zeros_like(piece_idx),
+                                 piece_idx)              # (B, 8, 8), valori 0-12
 
-        pos = -self.alpha       * (1 - p) ** self.gamma * targets       * torch.log(p)
-        neg = -(1 - self.alpha) * p       ** self.gamma * (1 - targets) * torch.log(1 - p)
+        weight = torch.ones(13, device=logits.device)
+        weight[0] = self.empty_weight
 
-        loss_per_cell = pos + neg  # (B, 12, 8, 8)
-
-        # Media per piano (dim=0,2,3) poi media sui piani
-        # Questo bilancia il contributo indipendentemente da quanti 1 ci sono nel piano
-        loss_per_plane = loss_per_cell.mean(dim=(0, 2, 3))  # (12,)
-        return loss_per_plane.mean()
+        return F.cross_entropy(logits, target_idx, weight=weight)
 
 
 # ─────────────────────────────────────────────
@@ -296,8 +298,9 @@ class ChessDecoder(nn.Module):
             ResBlock(base_ch),
             ResBlock(base_ch),
         )
-        # Testa pezzi: logit per ogni piano 0-11
-        self.piece_head = nn.Conv2d(base_ch, 12, 1)
+        # Testa pezzi: logit categorici per 13 classi (classe 0=vuoto, 1-12=pezzi)
+        # Con softmax/argmax garantisce strutturalmente una sola classe per casella.
+        self.piece_head = nn.Conv2d(base_ch, 13, 1)
         # Testa turno: un singolo logit medio
         self.turn_head  = nn.Sequential(
             nn.AdaptiveAvgPool2d(1),
@@ -309,15 +312,14 @@ class ChessDecoder(nn.Module):
         h = self.up1(z_q)   # (B, base_ch*2, 4, 4)
         h = self.up2(h)     # (B, base_ch,   8, 8)
 
-        piece_logits = self.piece_head(h)           # (B, 12, 8, 8)
-        turn_logit   = self.turn_head(h)            # (B, 1)  dopo Flatten+Linear
+        # (B, 13, 8, 8): logit categorici, classe 0=vuoto, 1-12=pezzi
+        piece_logits = self.piece_head(h)
 
-        # Espandi il turno su tutto il piano 12 per compatibilità con l'input
-        # turn_logit può uscire come (B,) se Flatten rimuove tutto → forza (B, 1)
-        turn_logit = turn_logit.view(-1, 1)
-        turn_plane = turn_logit.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 8, 8)  # (B, 1, 8, 8)
+        turn_logit = self.turn_head(h).view(-1, 1)
+        turn_plane = turn_logit.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 8, 8)
 
-        return torch.cat([piece_logits, turn_plane], dim=1)  # (B, 13, 8, 8)
+        # (B, 14, 8, 8): piani 0-12 = logit pezzi categorici, piano 13 = turno
+        return torch.cat([piece_logits, turn_plane], dim=1)
 
 
 # ─────────────────────────────────────────────
@@ -361,9 +363,9 @@ class ChessVQVAE(nn.Module):
         )
         self.aux_weight = aux_weight
 
-        self.focal_loss = FocalLossPerPlane(focal_alpha, focal_gamma)
-        self.bce        = nn.BCEWithLogitsLoss()
-        self.mse        = nn.MSELoss()
+        self.piece_loss_fn = CategoricalBoardLoss(empty_weight=0.03)
+        self.bce           = nn.BCEWithLogitsLoss()
+        self.mse           = nn.MSELoss()
 
     def forward(self, x: torch.Tensor, aux_target: torch.Tensor = None):
         """
@@ -375,11 +377,12 @@ class ChessVQVAE(nn.Module):
         z_q, vq_loss, commitment, indices = self.vq(z_e)
         x_recon = self.decoder(z_q)
 
-        # Loss pezzi (piani 0-11)
-        piece_loss = self.focal_loss(x_recon[:, :12], x[:, :12])
+        # Loss pezzi: cross-entropy categorica su 13 classi (0=vuoto, 1-12=pezzi)
+        # x_recon[:, :13] = logit categorici decoder, x[:, :12] = piani binari target
+        piece_loss = self.piece_loss_fn(x_recon[:, :13], x[:, :12])
 
-        # Loss turno (piano 12)
-        turn_loss  = self.bce(x_recon[:, 12:13, 0, 0],
+        # Loss turno: piano 13 del decoder vs piano 12 dell'input
+        turn_loss  = self.bce(x_recon[:, 13:14, 0, 0],
                               x[:, 12:13, 0, 0])
 
         recon_loss = piece_loss + 0.1 * turn_loss
