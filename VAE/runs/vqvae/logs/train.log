@@ -1,0 +1,467 @@
+16:32:54 | ============================================================
+16:32:54 | ChessVQVAE - Training
+16:32:54 | ============================================================
+16:32:54 | Config: {'csv': 'over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.25, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+16:32:54 | Device: cuda
+16:32:54 | GPU: NVIDIA GeForce RTX 3060
+16:32:54 | VRAM: 12.5 GB
+16:32:54 | Caricamento dataset...
+16:33:49 | ============================================================
+16:33:49 | ChessVQVAE - Training
+16:33:49 | ============================================================
+16:33:49 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.25, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+16:33:49 | Device: cuda
+16:33:49 | GPU: NVIDIA GeForce RTX 3060
+16:33:49 | VRAM: 12.5 GB
+16:33:49 | Caricamento dataset...
+16:33:55 | Batch per epoca (train): 6601
+16:33:56 | Parametri modello: 8,576,653
+16:33:56 | 
+────────────────────────────────────────────────────────────
+16:33:56 | Epoch 1/50  |  LR: 0.00e+00
+16:33:56 | ────────────────────────────────────────────────────────────
+16:33:57 |   step     0/6601 | loss 0.1187 | recon 0.1075 | vq 0.0112 | commit 0.0448 | it/s 0.9
+16:35:24 | ============================================================
+16:35:24 | ChessVQVAE - Training
+16:35:24 | ============================================================
+16:35:24 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.25, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+16:35:24 | Device: cuda
+16:35:24 | GPU: NVIDIA GeForce RTX 3060
+16:35:24 | VRAM: 12.5 GB
+16:35:24 | Caricamento dataset...
+16:35:31 | Batch per epoca (train): 6601
+16:35:31 | Parametri modello: 8,576,653
+16:35:31 | 
+────────────────────────────────────────────────────────────
+16:35:31 | Epoch 1/50  |  LR: 0.00e+00
+16:35:31 | ────────────────────────────────────────────────────────────
+16:35:32 |   step     0/6601 | loss 0.1353 | recon 0.1243 | vq 0.0110 | commit 0.0441 | it/s 1.1
+16:36:00 |   [dead reset] 453 vettori reinizializzati
+16:36:42 |   step   500/6601 | loss 0.1318 | recon 0.1239 | vq 0.0079 | commit 0.0315 | it/s 7.0
+16:37:54 |   step  1000/6601 | loss 0.1319 | recon 0.1242 | vq 0.0077 | commit 0.0309 | it/s 7.0
+16:38:53 | ============================================================
+16:38:53 | ChessVQVAE - Training
+16:38:53 | ============================================================
+16:38:53 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.25, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+16:38:53 | Device: cuda
+16:38:53 | GPU: NVIDIA GeForce RTX 3060
+16:38:53 | VRAM: 12.5 GB
+16:38:53 | Caricamento dataset...
+16:39:00 | Batch per epoca (train): 6601
+16:39:00 | Parametri modello: 8,576,653
+16:39:00 | 
+────────────────────────────────────────────────────────────
+16:39:00 | Epoch 1/50  |  LR: 0.00e+00
+16:39:00 | ────────────────────────────────────────────────────────────
+16:39:01 |   step     0/6601 | loss 0.1264 | recon 0.1153 | vq 0.0111 | commit 0.0446 | it/s 1.1
+16:39:29 |   [dead reset] 463 vettori reinizializzati
+16:40:12 |   step   500/6601 | loss 0.1225 | recon 0.1140 | vq 0.0085 | commit 0.0340 | it/s 7.0
+16:41:22 |   step  1000/6601 | loss 0.1203 | recon 0.1120 | vq 0.0083 | commit 0.0330 | it/s 7.0
+16:42:33 |   step  1500/6601 | loss 0.1225 | recon 0.1141 | vq 0.0084 | commit 0.0338 | it/s 7.1
+16:43:44 |   step  2000/6601 | loss 0.1194 | recon 0.1112 | vq 0.0082 | commit 0.0328 | it/s 7.1
+16:44:54 |   step  2500/6601 | loss 0.1211 | recon 0.1128 | vq 0.0083 | commit 0.0333 | it/s 7.1
+16:46:05 |   step  3000/6601 | loss 0.1202 | recon 0.1118 | vq 0.0084 | commit 0.0335 | it/s 7.1
+16:47:16 |   step  3500/6601 | loss 0.1222 | recon 0.1138 | vq 0.0084 | commit 0.0336 | it/s 7.1
+16:48:26 |   step  4000/6601 | loss 0.1211 | recon 0.1128 | vq 0.0083 | commit 0.0332 | it/s 7.1
+16:49:37 |   step  4500/6601 | loss 0.1235 | recon 0.1151 | vq 0.0084 | commit 0.0335 | it/s 7.1
+16:50:48 |   step  5000/6601 | loss 0.1218 | recon 0.1135 | vq 0.0083 | commit 0.0331 | it/s 7.1
+16:51:58 |   step  5500/6601 | loss 0.1211 | recon 0.1128 | vq 0.0083 | commit 0.0332 | it/s 7.1
+16:53:08 |   step  6000/6601 | loss 0.1243 | recon 0.1159 | vq 0.0084 | commit 0.0336 | it/s 7.1
+16:54:17 |   step  6500/6601 | loss 0.1216 | recon 0.1133 | vq 0.0083 | commit 0.0333 | it/s 7.1
+16:57:12 | 
+Epoch 1 completata in 1092s
+  TRAIN | loss 0.1219 | recon 0.1136 | vq 0.0084 | commit 0.0334 | piece_acc 0.5442 | turn_acc 0.5000
+  VAL   | loss 0.1219 | recon 0.1134 | vq 0.0085 | commit 0.0340 | piece_acc 0.5449 | turn_acc 0.5003
+  CODEBOOK | perplexity 66.3 / 512 | usage 13.9%
+16:57:12 |   ✓ Miglior checkpoint salvato (val_loss=0.1219)
+16:57:12 | 
+────────────────────────────────────────────────────────────
+16:57:12 | Epoch 2/50  |  LR: 1.50e-04
+16:57:12 | ────────────────────────────────────────────────────────────
+16:57:12 |   step     0/6601 | loss 0.1229 | recon 0.1145 | vq 0.0084 | commit 0.0336 | it/s 4.1
+16:58:21 |   step   500/6601 | loss 0.0799 | recon 0.0799 | vq 0.0000 | commit 0.0000 | it/s 7.3
+16:59:30 |   step  1000/6601 | loss 0.0799 | recon 0.0799 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:00:39 |   step  1500/6601 | loss 0.0798 | recon 0.0798 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:01:47 |   step  2000/6601 | loss 0.0797 | recon 0.0797 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:02:56 |   step  2500/6601 | loss 0.0798 | recon 0.0798 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:04:05 |   step  3000/6601 | loss 0.0799 | recon 0.0799 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:05:14 |   step  3500/6601 | loss 0.0801 | recon 0.0801 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:06:23 |   step  4000/6601 | loss 0.0798 | recon 0.0798 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:07:32 |   step  4500/6601 | loss 0.0799 | recon 0.0799 | vq 0.0000 | commit 0.0000 | it/s 7.3
+17:13:57 | ============================================================
+17:13:57 | ChessVQVAE - Training
+17:13:57 | ============================================================
+17:13:57 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+17:13:57 | Device: cuda
+17:13:57 | GPU: NVIDIA GeForce RTX 3060
+17:13:57 | VRAM: 12.5 GB
+17:13:57 | Caricamento dataset...
+17:14:05 | Batch per epoca (train): 6601
+17:14:05 | Parametri modello: 8,576,653
+17:14:05 | 
+────────────────────────────────────────────────────────────
+17:14:05 | Epoch 1/50  |  LR: 0.00e+00
+17:14:05 | ────────────────────────────────────────────────────────────
+17:38:37 | ============================================================
+17:38:37 | ChessVQVAE - Training
+17:38:37 | ============================================================
+17:38:37 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+17:38:37 | Device: cuda
+17:38:37 | GPU: NVIDIA GeForce RTX 3060
+17:38:37 | VRAM: 12.5 GB
+17:38:37 | Caricamento dataset...
+17:38:44 | Batch per epoca (train): 6601
+17:38:44 | Parametri modello: 8,576,653
+17:38:44 | 
+────────────────────────────────────────────────────────────
+17:38:44 | Epoch 1/50  |  LR: 0.00e+00
+17:38:44 | ────────────────────────────────────────────────────────────
+17:56:26 | 
+Epoch 1 completata in 1062s
+  TRAIN | loss 0.1881 | recon 0.1078 | vq 0.0803 | commit 0.0535 | piece_acc 0.5215 | turn_acc 0.4960
+  VAL   | loss 0.1850 | recon 0.1076 | vq 0.0774 | commit 0.0516 | piece_acc 0.5218 | turn_acc 0.4957
+  CODEBOOK | perplexity 238.6 / 512 | usage 80.1%
+17:56:26 |   ✓ Miglior checkpoint salvato (val_loss=0.1850)
+17:56:26 | 
+────────────────────────────────────────────────────────────
+17:56:26 | Epoch 2/50  |  LR: 1.50e-04
+17:56:26 | ────────────────────────────────────────────────────────────
+18:14:09 | 
+Epoch 2 completata in 1063s
+  TRAIN | loss 0.0799 | recon 0.0798 | vq 0.0001 | commit 0.0001 | piece_acc 0.9585 | turn_acc 0.5002
+  VAL   | loss 0.0802 | recon 0.0802 | vq 0.0000 | commit 0.0000 | piece_acc 0.9572 | turn_acc 0.4997
+  CODEBOOK | perplexity 4.0 / 512 | usage 0.8%
+18:14:09 |   ⚠ Codebook collapse sospettato! perplexity 4.0 < 26
+18:14:09 |   ✓ Miglior checkpoint salvato (val_loss=0.0802)
+18:14:09 | 
+────────────────────────────────────────────────────────────
+18:14:09 | Epoch 3/50  |  LR: 3.00e-04
+18:14:09 | ────────────────────────────────────────────────────────────
+18:20:16 | ============================================================
+18:20:16 | ChessVQVAE - Training
+18:20:16 | ============================================================
+18:20:16 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+18:20:16 | Device: cuda
+18:20:16 | GPU: NVIDIA GeForce RTX 3060
+18:20:16 | VRAM: 12.5 GB
+18:20:16 | Caricamento dataset...
+18:20:23 | Batch per epoca (train): 6601
+18:20:23 | Parametri modello: 8,576,653
+18:20:23 | 
+────────────────────────────────────────────────────────────
+18:20:23 | Epoch 1/50  |  LR: 0.00e+00
+18:20:23 | ────────────────────────────────────────────────────────────
+18:24:21 | ============================================================
+18:24:21 | ChessVQVAE - Training
+18:24:21 | ============================================================
+18:24:21 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+18:24:21 | Device: cuda
+18:24:21 | GPU: NVIDIA GeForce RTX 3060
+18:24:21 | VRAM: 12.5 GB
+18:24:21 | Caricamento dataset...
+18:24:28 | Batch per epoca (train): 6601
+18:24:28 | Parametri modello: 8,576,653
+18:24:28 | 
+────────────────────────────────────────────────────────────
+18:24:28 | Epoch 1/50  |  LR: 0.00e+00
+18:24:28 | ────────────────────────────────────────────────────────────
+18:41:34 | 
+Epoch 1 completata in 1026s
+  TRAIN | loss 0.9778 | recon 0.1196 | vq 0.8583 | commit 0.0532 | piece_acc 0.4806 | turn_acc 0.5000
+  VAL   | loss 1.0208 | recon 0.1196 | vq 0.9012 | commit 0.0513 | piece_acc 0.4805 | turn_acc 0.4997
+  CODEBOOK | perplexity 229.8 / 512 | usage 81.1%
+18:41:35 |   ✓ Miglior checkpoint salvato (val_loss=1.0208)
+18:41:35 | 
+────────────────────────────────────────────────────────────
+18:41:35 | Epoch 2/50  |  LR: 1.50e-04
+18:41:35 | ────────────────────────────────────────────────────────────
+18:58:58 | 
+Epoch 2 completata in 1044s
+  TRAIN | loss 1.7417 | recon 0.0799 | vq 1.6618 | commit 0.0001 | piece_acc 0.9584 | turn_acc 0.5002
+  VAL   | loss 1.7421 | recon 0.0802 | vq 1.6618 | commit 0.0000 | piece_acc 0.9581 | turn_acc 0.4997
+  CODEBOOK | perplexity 4.0 / 512 | usage 0.8%
+18:58:58 |   ⚠ Codebook collapse sospettato! perplexity 4.0 < 26
+18:58:58 | 
+────────────────────────────────────────────────────────────
+18:58:58 | Epoch 3/50  |  LR: 3.00e-04
+18:58:58 | ────────────────────────────────────────────────────────────
+19:11:56 | ============================================================
+19:11:56 | ChessVQVAE - Training
+19:11:56 | ============================================================
+19:11:56 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+19:11:56 | Device: cuda
+19:11:56 | GPU: NVIDIA GeForce RTX 3060
+19:11:56 | VRAM: 12.5 GB
+19:11:56 | Caricamento dataset...
+19:12:03 | Batch per epoca (train): 6601
+19:12:03 | Parametri modello: 8,708,237
+19:12:03 | 
+────────────────────────────────────────────────────────────
+19:12:03 | Epoch 1/50  |  LR: 0.00e+00
+19:12:03 | ────────────────────────────────────────────────────────────
+19:33:56 | ============================================================
+19:33:56 | ChessVQVAE - Training
+19:33:56 | ============================================================
+19:33:56 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+19:33:56 | Device: cuda
+19:33:56 | GPU: NVIDIA GeForce RTX 3060
+19:33:56 | VRAM: 12.5 GB
+19:33:56 | Caricamento dataset...
+19:34:04 | Batch per epoca (train): 6601
+19:34:04 | Parametri modello: 8,708,237
+19:34:04 | 
+────────────────────────────────────────────────────────────
+19:34:04 | Epoch 1/50  |  LR: 0.00e+00
+19:34:04 | ────────────────────────────────────────────────────────────
+19:51:39 | 
+Epoch 1 completata in 1055s
+  TRAIN | loss 0.1803 | recon 0.1078 | vq 0.0725 | commit 0.1450 | piece_acc 0.5523 | turn_acc 0.5000
+  VAL   | loss 0.1800 | recon 0.1075 | vq 0.0725 | commit 0.1449 | piece_acc 0.5521 | turn_acc 0.5003
+  CODEBOOK | perplexity 134.1 / 512 | usage 58.2%
+19:51:39 |   ✓ Miglior checkpoint salvato (val_loss=0.1800)
+19:51:39 | 
+────────────────────────────────────────────────────────────
+19:51:39 | Epoch 2/50  |  LR: 1.50e-04
+19:51:39 | ────────────────────────────────────────────────────────────
+20:08:52 | 
+Epoch 2 completata in 1032s
+  TRAIN | loss 0.0151 | recon 0.0091 | vq 0.0060 | commit 0.0120 | piece_acc 0.9669 | turn_acc 0.9950
+  VAL   | loss 0.0203 | recon 0.0074 | vq 0.0128 | commit 0.0257 | piece_acc 0.9659 | turn_acc 0.9991
+  CODEBOOK | perplexity 296.3 / 512 | usage 63.9%
+20:08:52 |   ✓ Miglior checkpoint salvato (val_loss=0.0203)
+20:08:52 | 
+────────────────────────────────────────────────────────────
+20:08:52 | Epoch 3/50  |  LR: 3.00e-04
+20:08:52 | ────────────────────────────────────────────────────────────
+20:26:12 | 
+Epoch 3 completata in 1040s
+  TRAIN | loss 0.0219 | recon 0.0060 | vq 0.0159 | commit 0.0317 | piece_acc 0.9704 | turn_acc 0.9998
+  VAL   | loss 0.0248 | recon 0.0069 | vq 0.0180 | commit 0.0359 | piece_acc 0.9666 | turn_acc 0.9997
+  CODEBOOK | perplexity 299.1 / 512 | usage 63.9%
+20:26:12 | 
+────────────────────────────────────────────────────────────
+20:26:12 | Epoch 4/50  |  LR: 3.00e-04
+20:26:12 | ────────────────────────────────────────────────────────────
+20:43:20 | 
+Epoch 4 completata in 1028s
+  TRAIN | loss 0.0255 | recon 0.0057 | vq 0.0198 | commit 0.0395 | piece_acc 0.9709 | turn_acc 0.9998
+  VAL   | loss 0.0304 | recon 0.0068 | vq 0.0236 | commit 0.0473 | piece_acc 0.9679 | turn_acc 0.9999
+  CODEBOOK | perplexity 299.6 / 512 | usage 64.5%
+20:43:20 | 
+────────────────────────────────────────────────────────────
+20:43:20 | Epoch 5/50  |  LR: 2.99e-04
+20:43:20 | ────────────────────────────────────────────────────────────
+21:00:14 | 
+Epoch 5 completata in 1014s
+  TRAIN | loss 0.0283 | recon 0.0056 | vq 0.0227 | commit 0.0453 | piece_acc 0.9711 | turn_acc 0.9998
+  VAL   | loss 0.0301 | recon 0.0068 | vq 0.0232 | commit 0.0465 | piece_acc 0.9675 | turn_acc 0.9995
+  CODEBOOK | perplexity 296.9 / 512 | usage 62.9%
+21:00:15 | 
+────────────────────────────────────────────────────────────
+21:00:15 | Epoch 6/50  |  LR: 2.97e-04
+21:00:15 | ────────────────────────────────────────────────────────────
+21:17:04 | 
+Epoch 6 completata in 1010s
+  TRAIN | loss 0.0299 | recon 0.0055 | vq 0.0244 | commit 0.0487 | piece_acc 0.9712 | turn_acc 0.9998
+  VAL   | loss 0.0335 | recon 0.0076 | vq 0.0259 | commit 0.0518 | piece_acc 0.9668 | turn_acc 0.9977
+  CODEBOOK | perplexity 298.5 / 512 | usage 62.3%
+21:17:04 | 
+────────────────────────────────────────────────────────────
+21:17:04 | Epoch 7/50  |  LR: 2.95e-04
+21:17:04 | ────────────────────────────────────────────────────────────
+21:33:54 | 
+Epoch 7 completata in 1010s
+  TRAIN | loss 0.0316 | recon 0.0055 | vq 0.0261 | commit 0.0522 | piece_acc 0.9713 | turn_acc 0.9998
+  VAL   | loss 0.0374 | recon 0.0067 | vq 0.0308 | commit 0.0615 | piece_acc 0.9684 | turn_acc 1.0000
+  CODEBOOK | perplexity 306.5 / 512 | usage 63.7%
+21:33:54 | 
+────────────────────────────────────────────────────────────
+21:33:54 | Epoch 8/50  |  LR: 2.92e-04
+21:33:54 | ────────────────────────────────────────────────────────────
+21:50:41 | 
+Epoch 8 completata in 1008s
+  TRAIN | loss 0.0340 | recon 0.0055 | vq 0.0285 | commit 0.0569 | piece_acc 0.9712 | turn_acc 0.9998
+  VAL   | loss 0.0398 | recon 0.0067 | vq 0.0332 | commit 0.0663 | piece_acc 0.9677 | turn_acc 0.9999
+  CODEBOOK | perplexity 296.2 / 512 | usage 61.7%
+21:50:41 | 
+────────────────────────────────────────────────────────────
+21:50:41 | Epoch 9/50  |  LR: 2.89e-04
+21:50:41 | ────────────────────────────────────────────────────────────
+22:07:24 | 
+Epoch 9 completata in 1002s
+  TRAIN | loss 0.0358 | recon 0.0055 | vq 0.0303 | commit 0.0605 | piece_acc 0.9712 | turn_acc 0.9998
+  VAL   | loss 0.0483 | recon 0.0068 | vq 0.0415 | commit 0.0829 | piece_acc 0.9671 | turn_acc 0.9994
+  CODEBOOK | perplexity 284.7 / 512 | usage 60.2%
+22:07:24 | 
+────────────────────────────────────────────────────────────
+22:07:24 | Epoch 10/50  |  LR: 2.85e-04
+22:07:24 | ────────────────────────────────────────────────────────────
+22:24:04 | 
+Epoch 10 completata in 1000s
+  TRAIN | loss 0.0364 | recon 0.0055 | vq 0.0309 | commit 0.0619 | piece_acc 0.9713 | turn_acc 0.9998
+  VAL   | loss 0.0391 | recon 0.0066 | vq 0.0325 | commit 0.0651 | piece_acc 0.9682 | turn_acc 0.9995
+  CODEBOOK | perplexity 297.2 / 512 | usage 62.3%
+22:24:04 | 
+────────────────────────────────────────────────────────────
+22:24:04 | Epoch 11/50  |  LR: 2.80e-04
+22:24:04 | ────────────────────────────────────────────────────────────
+22:40:44 | 
+Epoch 11 completata in 1000s
+  TRAIN | loss 0.0374 | recon 0.0055 | vq 0.0319 | commit 0.0637 | piece_acc 0.9713 | turn_acc 0.9998
+  VAL   | loss 0.0384 | recon 0.0080 | vq 0.0304 | commit 0.0608 | piece_acc 0.9677 | turn_acc 0.9968
+  CODEBOOK | perplexity 300.4 / 512 | usage 62.7%
+22:40:44 | 
+────────────────────────────────────────────────────────────
+22:40:44 | Epoch 12/50  |  LR: 2.75e-04
+22:40:44 | ────────────────────────────────────────────────────────────
+22:57:26 | 
+Epoch 12 completata in 1002s
+  TRAIN | loss 0.0380 | recon 0.0055 | vq 0.0325 | commit 0.0650 | piece_acc 0.9714 | turn_acc 0.9998
+  VAL   | loss 0.0426 | recon 0.0066 | vq 0.0360 | commit 0.0721 | piece_acc 0.9676 | turn_acc 0.9998
+  CODEBOOK | perplexity 296.8 / 512 | usage 62.3%
+22:57:26 | 
+Early stopping: 10 epoch senza miglioramenti.
+22:57:26 | 
+============================================================
+22:57:26 | Test finale sul best checkpoint...
+22:59:56 | TEST | loss 0.0202 | piece_acc 0.9658 | turn_acc 0.9992 | perplexity 296.2 | usage 63.9%
+22:59:56 | 
+Training completato.
+16:58:07 | ============================================================
+16:58:07 | ChessVQVAE - Training
+16:58:07 | ============================================================
+16:58:07 | Config: {'csv': '../over_mate_1_tactic_evals.csv', 'batch_size': 256, 'latent_dim': 256, 'num_embeddings': 512, 'base_ch': 128, 'beta': 0.5, 'focal_alpha': 0.85, 'focal_gamma': 2.0, 'epochs': 50, 'lr': 0.0003, 'weight_decay': 0.0001, 'min_lr_ratio': 0.1, 'warmup_epochs': 2, 'dead_reset_every': 200, 'grad_accum': 4, 'aux_weight': 0.5, 'output_dir': './runs/vqvae', 'save_every': 5, 'patience': 10, 'resume': ''}
+16:58:07 | Device: cuda
+16:58:07 | GPU: NVIDIA GeForce RTX 3060
+16:58:07 | VRAM: 12.5 GB
+16:58:07 | Caricamento dataset...
+16:58:13 | Batch per epoca (train): 6601
+16:58:13 | Parametri modello: 8,839,566
+16:58:13 | 
+────────────────────────────────────────────────────────────
+16:58:13 | Epoch 1/50  |  LR: 0.00e+00
+16:58:13 | ────────────────────────────────────────────────────────────
+17:16:04 | 
+Epoch 1 completata in 1071s
+  TRAIN | loss 0.3227 | recon 0.1149 | vq 0.0708 | aux 0.2740 | piece_acc 0.5047 | turn_acc 0.5000
+  VAL   | loss 0.3096 | recon 0.1147 | vq 0.0707 | aux 0.2483 | piece_acc 0.5046 | turn_acc 0.4997
+  CODEBOOK | perplexity 262.3 / 512 | usage 96.1%
+17:16:05 |   ✓ Miglior checkpoint salvato (val_loss=0.3096)
+17:16:05 | 
+────────────────────────────────────────────────────────────
+17:16:05 | Epoch 2/50  |  LR: 1.50e-04
+17:16:05 | ────────────────────────────────────────────────────────────
+17:33:48 | 
+Epoch 2 completata in 1063s
+  TRAIN | loss 0.1273 | recon 0.0105 | vq 0.0050 | aux 0.2237 | piece_acc 0.9615 | turn_acc 0.9976
+  VAL   | loss 0.1170 | recon 0.0123 | vq 0.0034 | aux 0.2027 | piece_acc 0.9643 | turn_acc 0.9946
+  CODEBOOK | perplexity 394.0 / 512 | usage 100.0%
+17:33:48 |   ✓ Miglior checkpoint salvato (val_loss=0.1170)
+17:33:48 | 
+────────────────────────────────────────────────────────────
+17:33:48 | Epoch 3/50  |  LR: 3.00e-04
+17:33:48 | ────────────────────────────────────────────────────────────
+17:50:56 | 
+Epoch 3 completata in 1028s
+  TRAIN | loss 0.1260 | recon 0.0086 | vq 0.0171 | aux 0.2005 | piece_acc 0.9647 | turn_acc 0.9998
+  VAL   | loss 0.1111 | recon 0.0085 | vq 0.0045 | aux 0.1960 | piece_acc 0.9636 | turn_acc 0.9997
+  CODEBOOK | perplexity 467.6 / 512 | usage 100.0%
+17:50:56 |   ✓ Miglior checkpoint salvato (val_loss=0.1111)
+17:50:56 | 
+────────────────────────────────────────────────────────────
+17:50:56 | Epoch 4/50  |  LR: 3.00e-04
+17:50:56 | ────────────────────────────────────────────────────────────
+18:08:08 | 
+Epoch 4 completata in 1032s
+  TRAIN | loss 0.1265 | recon 0.0080 | vq 0.0293 | aux 0.1784 | piece_acc 0.9653 | turn_acc 0.9997
+  VAL   | loss 0.1134 | recon 0.0080 | vq 0.0102 | aux 0.1902 | piece_acc 0.9631 | turn_acc 1.0000
+  CODEBOOK | perplexity 472.7 / 512 | usage 100.0%
+18:08:08 | 
+────────────────────────────────────────────────────────────
+18:08:08 | Epoch 5/50  |  LR: 2.99e-04
+18:08:08 | ────────────────────────────────────────────────────────────
+18:25:13 | 
+Epoch 5 completata in 1025s
+  TRAIN | loss 0.1398 | recon 0.0078 | vq 0.0520 | aux 0.1600 | piece_acc 0.9653 | turn_acc 0.9998
+  VAL   | loss 0.1194 | recon 0.0081 | vq 0.0189 | aux 0.1848 | piece_acc 0.9625 | turn_acc 1.0000
+  CODEBOOK | perplexity 471.6 / 512 | usage 100.0%
+18:25:14 | 
+────────────────────────────────────────────────────────────
+18:25:14 | Epoch 6/50  |  LR: 2.97e-04
+18:25:14 | ────────────────────────────────────────────────────────────
+18:42:26 | 
+Epoch 6 completata in 1032s
+  TRAIN | loss 0.1490 | recon 0.0077 | vq 0.0693 | aux 0.1440 | piece_acc 0.9656 | turn_acc 0.9997
+  VAL   | loss 0.1167 | recon 0.0079 | vq 0.0168 | aux 0.1841 | piece_acc 0.9660 | turn_acc 0.9999
+  CODEBOOK | perplexity 472.6 / 512 | usage 100.0%
+18:42:26 | 
+────────────────────────────────────────────────────────────
+18:42:26 | Epoch 7/50  |  LR: 2.95e-04
+18:42:26 | ────────────────────────────────────────────────────────────
+18:59:37 | 
+Epoch 7 completata in 1031s
+  TRAIN | loss 0.1598 | recon 0.0077 | vq 0.0876 | aux 0.1291 | piece_acc 0.9659 | turn_acc 0.9997
+  VAL   | loss 0.1202 | recon 0.0080 | vq 0.0192 | aux 0.1860 | piece_acc 0.9665 | turn_acc 0.9996
+  CODEBOOK | perplexity 475.6 / 512 | usage 100.0%
+18:59:37 | 
+────────────────────────────────────────────────────────────
+18:59:37 | Epoch 8/50  |  LR: 2.92e-04
+18:59:37 | ────────────────────────────────────────────────────────────
+19:16:42 | 
+Epoch 8 completata in 1025s
+  TRAIN | loss 0.1675 | recon 0.0076 | vq 0.1017 | aux 0.1164 | piece_acc 0.9662 | turn_acc 0.9997
+  VAL   | loss 0.1294 | recon 0.0079 | vq 0.0271 | aux 0.1887 | piece_acc 0.9655 | turn_acc 0.9997
+  CODEBOOK | perplexity 483.6 / 512 | usage 100.0%
+19:16:42 | 
+────────────────────────────────────────────────────────────
+19:16:42 | Epoch 9/50  |  LR: 2.89e-04
+19:16:42 | ────────────────────────────────────────────────────────────
+19:33:44 | 
+Epoch 9 completata in 1022s
+  TRAIN | loss 0.1683 | recon 0.0076 | vq 0.1088 | aux 0.1040 | piece_acc 0.9665 | turn_acc 0.9998
+  VAL   | loss 0.1421 | recon 0.0078 | vq 0.0367 | aux 0.1953 | piece_acc 0.9652 | turn_acc 1.0000
+  CODEBOOK | perplexity 484.5 / 512 | usage 100.0%
+19:33:44 | 
+────────────────────────────────────────────────────────────
+19:33:44 | Epoch 10/50  |  LR: 2.85e-04
+19:33:44 | ────────────────────────────────────────────────────────────
+19:50:39 | 
+Epoch 10 completata in 1015s
+  TRAIN | loss 0.1574 | recon 0.0076 | vq 0.1039 | aux 0.0920 | piece_acc 0.9667 | turn_acc 0.9997
+  VAL   | loss 0.1460 | recon 0.0078 | vq 0.0360 | aux 0.2044 | piece_acc 0.9669 | turn_acc 1.0000
+  CODEBOOK | perplexity 486.7 / 512 | usage 100.0%
+19:50:39 | 
+────────────────────────────────────────────────────────────
+19:50:39 | Epoch 11/50  |  LR: 2.80e-04
+19:50:39 | ────────────────────────────────────────────────────────────
+20:07:34 | 
+Epoch 11 completata in 1015s
+  TRAIN | loss 0.1354 | recon 0.0075 | vq 0.0876 | aux 0.0804 | piece_acc 0.9669 | turn_acc 0.9998
+  VAL   | loss 0.1423 | recon 0.0077 | vq 0.0320 | aux 0.2052 | piece_acc 0.9657 | turn_acc 0.9999
+  CODEBOOK | perplexity 487.5 / 512 | usage 100.0%
+20:07:34 | 
+────────────────────────────────────────────────────────────
+20:07:34 | Epoch 12/50  |  LR: 2.75e-04
+20:07:34 | ────────────────────────────────────────────────────────────
+20:24:18 | 
+Epoch 12 completata in 1003s
+  TRAIN | loss 0.1103 | recon 0.0075 | vq 0.0679 | aux 0.0697 | piece_acc 0.9671 | turn_acc 0.9998
+  VAL   | loss 0.1477 | recon 0.0079 | vq 0.0354 | aux 0.2087 | piece_acc 0.9652 | turn_acc 0.9996
+  CODEBOOK | perplexity 488.1 / 512 | usage 100.0%
+20:24:18 | 
+────────────────────────────────────────────────────────────
+20:24:18 | Epoch 13/50  |  LR: 2.69e-04
+20:24:18 | ────────────────────────────────────────────────────────────
+20:40:56 | 
+Epoch 13 completata in 998s
+  TRAIN | loss 0.0957 | recon 0.0075 | vq 0.0580 | aux 0.0604 | piece_acc 0.9673 | turn_acc 0.9998
+  VAL   | loss 0.1444 | recon 0.0078 | vq 0.0325 | aux 0.2082 | piece_acc 0.9669 | turn_acc 0.9996
+  CODEBOOK | perplexity 488.2 / 512 | usage 100.0%
+20:40:56 | 
+Early stopping: 10 epoch senza miglioramenti.
+20:40:56 | 
+============================================================
+20:40:56 | Test finale sul best checkpoint...
+20:43:34 | TEST | loss 0.1111 | piece_acc 0.9635 | turn_acc 0.9998 | perplexity 467.7 | usage 100.0%
+20:43:34 | 
+Training completato.

@@ -361,6 +361,6 @@ def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", b
     print(f"Validation set size: {len(validationset)}")
     print(f"Test set size: {len(testset)}")
 
-    print(move_vocab)
+    #print(move_vocab)
 
     return trainloader, validationloader, testloader, move_vocab
