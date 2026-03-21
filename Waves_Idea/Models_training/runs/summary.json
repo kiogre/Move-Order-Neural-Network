@@ -1,0 +1,15 @@
+{
+  "baseline_top1": 0.4966702063396139,
+  "fields_top1": 0.49711771844660196,
+  "delta_pp": 0.04475121069880683,
+  "config": {
+    "csv": "../../over_mate_1_tactic_evals.csv",
+    "samples": 500000,
+    "epochs": 10,
+    "batch": 256,
+    "lr": 0.001,
+    "alpha": 0.9,
+    "workers": 4,
+    "outdir": "runs"
+  }
+}

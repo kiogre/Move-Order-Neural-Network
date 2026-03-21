@@ -12,5 +12,10 @@ MLChess/Models/my_resnet.py
 MLChess/Representation/data_organization_tensor.py
 MLChess/Representation/graph_representation.py
 MLChess/Representation/new_graph_representation.py
+MLChess/Representation/With_Waves/chess_fields.py
+MLChess/Representation/With_Waves/data_organization_tensor_fields.py
+MLChess/Representation/With_Waves/dataset_with_precomputed_fields.py
+MLChess/Representation/With_Waves/new_graph_representation_fields.py
+MLChess/Representation/With_Waves/precompute_fields.py
 MLChess/Understanding/Chess_GCN_Explainer.py
 MLChess/Understanding/Chess_MPNN_Explainer.py
