@@ -3,3 +3,7 @@ chess_precomputed.h5
 chess_raw.h5
 fields.h5
 mate_trajectories.h5
+chess_phase1_last.pt
+chess_phase2_last.pt
+chess_phase2_best.pt
+chess_phase1_best.pt
