@@ -6,7 +6,7 @@ from .Understanding.Chess_GCN_Explainer import ChessGCNExplainer
 from .Representation.new_graph_representation import ChessLazyDenseDataset, create_hdf5_from_csv, DatasetMPNN
 from .Understanding.Chess_MPNN_Explainer import ChessMPNNExplainer
 from .Representation.Siamese_Autoencoder_Representation import build_and_save_trajectories, SiameseChessDataset
-from .Models.mcts import MCTS
+from .Models.mcts import MCTS, JellyfishMCTS
 
 __version__ = "1.0.0"
 
@@ -15,4 +15,4 @@ __all__ = ["create_dataloaders_tensor", "MyResNet", "ChessBackbone", "FullChessM
            "ChessGCNExplainer", "preprocess_to_hdf5", "preprocess_to_hdf5_fast", "ChessLazyDenseDataset",
            "create_hdf5_from_csv", "DatasetMPNN", "GraphAndPoolingChessMPNN", "ChessMPNNExplainer",
            "ChessPositionGraphMPNN", "ChessTransform", "generate_all_legal_move_vocab", 
-           "build_and_save_trajectories", "SiameseChessDataset", "MCTS"]
+           "build_and_save_trajectories", "SiameseChessDataset", "MCTS", "JellyfishMCTS"]
