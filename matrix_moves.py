@@ -42,9 +42,6 @@ def queen_moves():
     return torch.max(rook, bishop)
 
 def king_moves():
-    '''
-    Sbagliato
-    '''
     moves = torch.zeros((64, 64), dtype=torch.float32)
     
     for i in range(64):
@@ -53,8 +50,7 @@ def king_moves():
         for j in range(64):
             r2, c2 = j // 8, j % 8
 
-            # Scegliere il massimo, poi fare distanza di Manhattan
-            
+            # Scegliere il massimo, poi fare distanza di Manhattan            
             moves[i,j] = 1/(1 + abs(r1 - r2)*(abs(r1-r2)>=abs(c1-c2)) + abs(c1 - c2)*(abs(c1-c2)>abs(r1-r2)))
             
                 
@@ -149,4 +145,14 @@ all_moves = {
     'knight': knight_moves()
 }
 
-torch.save(all_moves, 'attention_based_matrix_64x64.pt')
+M = torch.stack([
+    all_moves['white_pawn'],
+    all_moves['black_pawn'],
+    all_moves['knight'],
+    all_moves['bishop'],
+    all_moves['rook'],
+    all_moves['queen'],
+    all_moves['king'],
+])  # (7, 64, 64)
+
+torch.save(M, 'attention_based_matrix_64x64.pt')
