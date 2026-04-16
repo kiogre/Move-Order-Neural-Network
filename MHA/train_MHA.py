@@ -15,7 +15,7 @@ from MLChess import ChessMHA
 DEVICE      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CSV_FILE    = "../over_mate_1_tactic_evals.csv"
 BATCH_SIZE  = 128
-EPOCHS      = 50
+EPOCHS      = 30 #50
 LR          = 1e-3
 CHECKPOINT  = "chess_mha_checkpoint.pt"
 
@@ -34,7 +34,7 @@ def policy_loss_fn(logits: torch.Tensor,
     prima di calcolare la loss, così il modello non viene penalizzato
     per aver assegnato probabilità basse a mosse che non esistono.
     """
-    INF = 1e9
+    INF = float("inf")
     logits = logits.masked_fill(~mask, -INF)
     return nn.CrossEntropyLoss()(logits, targets)
 
