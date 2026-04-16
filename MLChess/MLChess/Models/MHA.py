@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class MHA(nn.Module):
-    def __init__(self, d_model = 64*7, n_heads = 7):
+    def __init__(self, d_model = 64*7, n_heads = 7, input_dim = 13):
         super(MHA, self).__init__()
         self.d_model = d_model
         self.n_heads = n_heads
@@ -14,9 +14,9 @@ class MHA(nn.Module):
 
         assert self.head_dim * n_heads == d_model, "d_model must be divisible by n_heads"
         
-        self.q_linear = nn.Linear(d_model, d_model)
-        self.k_linear = nn.Linear(d_model, d_model)
-        self.v_linear = nn.Linear(d_model, d_model)
+        self.q_linear = nn.Linear(input_dim, d_model)
+        self.k_linear = nn.Linear(input_dim, d_model)
+        self.v_linear = nn.Linear(input_dim, d_model)
         self.out_linear = nn.Linear(d_model, d_model)
 
     def forward(self, x):
@@ -49,7 +49,7 @@ class ChessMHA(nn.Module):
     def __init__(self, d_model=64*7, n_heads=7):
         super(ChessMHA, self).__init__()
         self.mha = MHA(d_model, n_heads)
-        self.layer_1 = nn.Linear(d_model, 256)
+        self.layer_1 = nn.Linear(d_model*64, 256)
         self.layer_2 = nn.Linear(256, 128)
         self.value = nn.Linear(128, 1)
         self.policy = nn.Sequential(
@@ -59,7 +59,14 @@ class ChessMHA(nn.Module):
         )
 
     def forward(self, x):
+
+        batch_size = x.size(0)
+        x = x.view(batch_size, 13, 64).permute(0, 2, 1)  # (batch, 64, 13)
+
         x = self.mha(x)
+
+        x = x.view(batch_size, -1)
+
         x = self.layer_1(x)
         x = F.relu(x)
         x = self.layer_2(x)
