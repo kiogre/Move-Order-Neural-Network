@@ -3,19 +3,16 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
-import sys
 from tqdm import tqdm
 
-from MLChess import create_dataloaders_tensor
-from MLChess import ChessMHA
-
+from MLChess import create_dataloaders_tensor, ChessMHA
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
 DEVICE      = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 CSV_FILE    = "../over_mate_1_tactic_evals.csv"
-BATCH_SIZE  = 128
-EPOCHS      = 30 #50
+BATCH_SIZE  = 1024
+EPOCHS      = 30
 LR          = 1e-3
 CHECKPOINT  = "chess_mha_checkpoint.pt"
 
@@ -27,15 +24,11 @@ LAMBDA_POLICY = 1.0
 # ── Funzioni di supporto ──────────────────────────────────────────────────────
 
 def policy_loss_fn(logits: torch.Tensor,
-                   targets: torch.Tensor,
-                   mask: torch.Tensor) -> torch.Tensor:
+                   targets: torch.Tensor) -> torch.Tensor:
     """
-    Cross-entropy mascherata: azzera i logit delle mosse illegali
-    prima di calcolare la loss, così il modello non viene penalizzato
-    per aver assegnato probabilità basse a mosse che non esistono.
+    La maschera è già applicata dentro il forward del modello
+    con masked_fill(-inf), quindi qui basta la cross-entropy standard.
     """
-    INF = float("inf")
-    logits = logits.masked_fill(~mask, -INF)
     return nn.CrossEntropyLoss()(logits, targets)
 
 
@@ -54,13 +47,13 @@ def run_epoch(model, loader, optimizer, train: bool):
             mask    = mask.to(DEVICE)
             results = results.to(DEVICE)
 
-            value_pred, policy_pred = model(boards)
+            value_pred, policy_pred = model(boards, mask)
 
             # Value loss — regressione sulla valutazione normalizzata in [-1, 1]
             v_loss = nn.MSELoss()(value_pred.squeeze(-1), results)
 
-            # Policy loss — classificazione sulla mossa migliore
-            p_loss = policy_loss_fn(policy_pred, moves, mask)
+            # Policy loss — la maschera è già applicata dentro il modello
+            p_loss = policy_loss_fn(policy_pred, moves)
 
             loss = LAMBDA_VALUE * v_loss + LAMBDA_POLICY * p_loss
 
@@ -76,9 +69,8 @@ def run_epoch(model, loader, optimizer, train: bool):
             total_value_loss  += v_loss.item()  * batch_size
             total_policy_loss += p_loss.item()  * batch_size
 
-            # Accuracy policy (top-1)
-            masked_logits  = policy_pred.masked_fill(~mask, -1e9)
-            predicted_move = masked_logits.argmax(dim=-1)
+            # Accuracy policy (top-1) — policy_pred ha già -inf sulle mosse illegali
+            predicted_move = policy_pred.argmax(dim=-1)
             correct += (predicted_move == moves).sum().item()
             total   += batch_size
 
@@ -116,13 +108,15 @@ def main():
     trainloader, valloader, testloader, move_vocab = create_dataloaders_tensor(
         name_file=CSV_FILE,
         batch_size=BATCH_SIZE,
+        num_workers = 4,
+        pin_memory=True
     )
 
     # Modello
     model = ChessMHA().to(DEVICE)
     print(f"Parametri totali: {sum(p.numel() for p in model.parameters()):,}")
 
-    optimizer = optim.Adam(model.parameters(), lr=LR)
+    optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", patience=5, factor=0.5)
 
     start_epoch = 0

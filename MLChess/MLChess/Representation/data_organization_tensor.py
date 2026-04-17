@@ -301,7 +301,7 @@ def generate_all_legal_move_vocab() -> dict[str, int]:
     return move_dict
 
 
-def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", batch_size: int = 128):
+def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", batch_size: int = 128, num_workers: int = 0, pin_memory: bool = False):
     '''
     Function to create dataloaders for training, validation and testing for chess, given a CSV file with this format:
     FEN,Move,Evaluation
@@ -337,7 +337,9 @@ def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", b
         trainset,
         batch_size=BATCH_SIZE,
         shuffle=True,
+        num_workers=num_workers,
         collate_fn=collate_fn,
+        pin_memory=pin_memory,
         generator=g
     )
 
@@ -345,7 +347,9 @@ def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", b
         validationset,
         batch_size=BATCH_SIZE,
         shuffle=False,
+        num_workers=num_workers,
         collate_fn=collate_fn,
+        pin_memory=pin_memory,
         generator=g
     )
 
@@ -353,7 +357,9 @@ def create_dataloaders_tensor(name_file: str = "over_mate_1_tactic_evals.csv", b
         testset,
         batch_size=BATCH_SIZE,
         shuffle=False,
+        num_workers=num_workers,
         collate_fn=collate_fn,
+        pin_memory=pin_memory,
         generator=g
     )
 

@@ -57,8 +57,9 @@ class ChessMHA(nn.Module):
             nn.ReLU(),
             nn.Linear(128, 1968)
         )
+        self.dropout = nn.Dropout(0.3)
 
-    def forward(self, x):
+    def forward(self, x, mask):
 
         batch_size = x.size(0)
         x = x.view(batch_size, 13, 64).permute(0, 2, 1)  # (batch, 64, 13)
@@ -69,10 +70,15 @@ class ChessMHA(nn.Module):
 
         x = self.layer_1(x)
         x = F.relu(x)
+        x = self.dropout(x)
         x = self.layer_2(x)
         x = F.relu(x)
+        x = self.dropout(x)
 
         value = self.value(x)
         policy = self.policy(x)
+
+        mask = mask.bool()
+        policy = policy.masked_fill(mask == 0, float('-inf'))
 
         return value, policy
