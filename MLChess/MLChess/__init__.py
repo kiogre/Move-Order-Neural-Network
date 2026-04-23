@@ -7,7 +7,7 @@ from .Representation.new_graph_representation import ChessLazyDenseDataset, crea
 from .Understanding.Chess_MPNN_Explainer import ChessMPNNExplainer
 from .Representation.Siamese_Autoencoder_Representation import build_and_save_trajectories, SiameseChessDataset
 from .Models.mcts import MCTS, JellyfishMCTS
-from .Models.MHA import MHA, ChessMHA
+from .Models.MHA import MHA, ChessMHA, MHA_2, ChessMHA_2, MHA_3, ChessMHA_3
 
 __version__ = "1.0.0"
 
@@ -17,4 +17,4 @@ __all__ = ["create_dataloaders_tensor", "MyResNet", "ChessBackbone", "FullChessM
            "create_hdf5_from_csv", "DatasetMPNN", "GraphAndPoolingChessMPNN", "ChessMPNNExplainer",
            "ChessPositionGraphMPNN", "ChessTransform", "generate_all_legal_move_vocab", 
            "build_and_save_trajectories", "SiameseChessDataset", "MCTS", "JellyfishMCTS", "MHA",
-           "ChessMHA"]
+           "ChessMHA", "MHA_2", "ChessMHA_2", "MHA_3", "ChessMHA_3"]

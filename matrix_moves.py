@@ -71,7 +71,7 @@ def white_pawn_moves():
                 moves[i,j] = 1/(1 + (r2 - r1)-int(r1==1))
 
     for i in range(8):
-        moves[i+8, 16] = 0.5
+        moves[i+8, 16+i] = 0.5
     return moves
 
 def black_pawn_moves():
@@ -89,7 +89,7 @@ def black_pawn_moves():
                 moves[i,j] = 1/(1 + (r1 - r2)-int(r1==6))
 
     for i in range(8):
-        moves[i+48, 47] = 0.5
+        moves[i+48, 40+i] = 0.5
     return moves
 
 import torch
@@ -128,13 +128,18 @@ def knight_moves():
 '''
 import matplotlib.pyplot as plt
 
-moves = bishop_moves()
+moves = rook_moves()
 
-plt.imshow(moves.numpy(), cmap='viridis')
-plt.colorbar()
-plt.title("Visualizzazione Matrice Alfiere")
-plt.show()
+e2 = moves[0]
+
+e2 = moves.mean(dim=0).numpy().reshape(64)
+
+for i in range(64):
+    print(f"{float(e2[i]):.10f}" , end=" ")
+    if (i+1)%8==0:
+        print('')
 '''
+
 all_moves = {
     'rook': rook_moves(),
     'bishop': bishop_moves(),

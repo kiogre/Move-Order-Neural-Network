@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import os
 from tqdm import tqdm
 
-from MLChess import create_dataloaders_tensor, ChessMHA
+from MLChess import create_dataloaders_tensor, ChessMHA, ChessMHA_2, ChessMHA_3
 
 # ── Configurazione ────────────────────────────────────────────────────────────
 
@@ -14,7 +14,7 @@ CSV_FILE    = "../over_mate_1_tactic_evals.csv"
 BATCH_SIZE  = 1024
 EPOCHS      = 30
 LR          = 1e-3
-CHECKPOINT  = "chess_mha_checkpoint.pt"
+CHECKPOINT  = "chess_mha_3_checkpoint.pt"
 
 # Pesi delle due loss
 LAMBDA_VALUE  = 1.0
@@ -113,7 +113,7 @@ def main():
     )
 
     # Modello
-    model = ChessMHA().to(DEVICE)
+    model = ChessMHA_3().to(DEVICE)
     print(f"Parametri totali: {sum(p.numel() for p in model.parameters()):,}")
 
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
