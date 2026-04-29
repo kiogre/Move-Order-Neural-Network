@@ -230,7 +230,7 @@ class PointerChessDataset(torch.utils.data.Dataset):
 # Collate function
 # ---------------------------------------------------------------------------
 
-def collate_fn(batch):
+def collate_fn_pointer(batch):
     """
     Combina un batch di elementi con numero variabile di mosse legali.
 
@@ -294,7 +294,7 @@ def create_dataloaders_pointer(
     g = torch.Generator()
 
     common = dict(
-        collate_fn=collate_fn,
+        collate_fn=collate_fn_pointer,
         num_workers=num_workers,
         pin_memory=pin_memory,
         generator=g,

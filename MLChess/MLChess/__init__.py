@@ -19,4 +19,4 @@ __all__ = ["create_dataloaders_tensor", "MyResNet", "ChessBackbone", "FullChessM
            "ChessPositionGraphMPNN", "ChessTransform", "generate_all_legal_move_vocab", 
            "build_and_save_trajectories", "SiameseChessDataset", "MCTS", "JellyfishMCTS", "MHA",
            "ChessMHA", "MHA_2", "ChessMHA_2", "MHA_3", "ChessMHA_3", "create_dataloaders_pointer", "PointerChessDataset", "collate_fn_pointer",
-             "encode_board", "encode_legal_moves", "encode_move"]
+            "encode_board", "encode_legal_moves", "encode_move"]
