@@ -273,7 +273,7 @@ def collate_fn(batch):
 # Funzione di creazione dataloaders
 # ---------------------------------------------------------------------------
 
-def create_dataloaders(
+def create_dataloaders_pointer(
     csv_file:    str  = "over_mate_1_tactic_evals.csv",
     batch_size:  int  = 128,
     num_workers: int  = 0,
