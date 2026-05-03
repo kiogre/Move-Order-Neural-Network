@@ -276,13 +276,18 @@ def train_on_buffer(
 # Checkpoint
 # ---------------------------------------------------------------------------
 
-def save_checkpoint(state: dict, path: str):
+import pickle
+
+def save_checkpoint(state: dict, path: str, replay_buffer):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    buffer_path = path.replace(".pt", "_buffer.pkl")
+    with open(buffer_path, "wb") as f:
+        pickle.dump(list(replay_buffer), f)
     torch.save(state, path)
     tqdm.write(f"  → checkpoint salvato: {path}")
 
 
-def load_checkpoint(path, model, optimizer, scheduler):
+def load_checkpoint(path, model, optimizer, scheduler, replay_buffer):
     ckpt       = torch.load(path, map_location=DEVICE)
     model.load_state_dict(ckpt["model"])
     if "optimizer" in ckpt:
@@ -293,6 +298,12 @@ def load_checkpoint(path, model, optimizer, scheduler):
     best_wr    = ckpt.get("best_winrate", 0.0)
     frozen_sd  = ckpt.get("frozen_state_dict", None)
     tqdm.write(f"  → checkpoint caricato: {path}  (epoch {epoch}, best winrate {best_wr:.3f})")
+    buffer_path = path.replace(".pt", "_buffer.pkl")
+    if os.path.exists(buffer_path):
+        with open(buffer_path, "rb") as f:
+            loaded = pickle.load(f)
+        replay_buffer.extend(loaded)
+        tqdm.write(f"  → buffer caricato: {len(replay_buffer)} step")
     return epoch, best_wr, frozen_sd
 
 
@@ -318,7 +329,7 @@ def main():
     if os.path.exists(az_last):
         print("Checkpoint AlphaZero trovato, riprendo...")
         start_epoch, best_winrate, frozen_sd = load_checkpoint(
-            az_last, main_model, optimizer, scheduler
+            az_last, main_model, optimizer, scheduler, replay_buffer
         )
         start_epoch += 1
         if frozen_sd is not None:
@@ -433,12 +444,12 @@ def main():
             "best_winrate":      best_winrate,
         }
 
-        save_checkpoint(checkpoint_state, os.path.join(AZ_CHECKPOINT_DIR, "last.pt"))
+        save_checkpoint(checkpoint_state, os.path.join(AZ_CHECKPOINT_DIR, "last.pt"), replay_buffer)
 
         if winrate > best_winrate:
             best_winrate = winrate
             checkpoint_state["best_winrate"] = best_winrate
-            save_checkpoint(checkpoint_state, os.path.join(AZ_CHECKPOINT_DIR, "best.pt"))
+            save_checkpoint(checkpoint_state, os.path.join(AZ_CHECKPOINT_DIR, "best.pt"), replay_buffer)
             tqdm.write(f"  ★ Nuovo best winrate: {best_winrate:.3f}")
 
         epoch_bar.set_postfix({
