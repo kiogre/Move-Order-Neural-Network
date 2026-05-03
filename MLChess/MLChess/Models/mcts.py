@@ -21,6 +21,10 @@ import numpy as np
 import torch
 import chess
 from typing import Optional
+from .Pointer_model import JellyFishPointer
+from ..Representation.pointer_dataset import encode_board, encode_legal_moves
+
+MOVE_VECTOR_DIM = 46
  
  
 # ---------------------------------------------------------------------------
@@ -102,7 +106,7 @@ class MCTS:
         self.dirichlet_epsilon = dirichlet_epsilon
         self.batch_size = batch_size
         self.move_vocab = move_vocab
-        self.vocab_size = max(move_vocab.values()) + 1
+        self.vocab_size = max(move_vocab.values()) + 1 if move_vocab else 1
  
     # ------------------------------------------------------------------
     # Interfaccia pubblica
@@ -404,4 +408,161 @@ class JellyfishMCTS(MCTS):
  
         policy_batch, value_batch = self.model.forward_phase2(batch, masks)
         return policy_batch.cpu(), value_batch.squeeze(-1).cpu()    # (N,V), (N,)
+
+
+class PointerMCTS(MCTS):
+    """
+    MCTS per JellyFishPointer.
  
+    Differenze rispetto alla classe base:
+    - Nessun vocabolario di mosse — i prior vengono dai probs della pointer network
+      direttamente sulle mosse legali, senza maschere su indici fissi.
+    - _infer_batch fa una forward pass con padding delle mosse per ogni nodo del batch.
+    - _masked_softmax è sostituito da _compute_priors che lavora sui probs pointer.
+    """
+ 
+    def __init__(
+        self,
+        model:             JellyFishPointer,
+        device:            torch.device,
+        c_puct:            float = 1.5,
+        dirichlet_alpha:   float = 0.3,
+        dirichlet_epsilon: float = 0.25,
+        batch_size:        int   = 8,    # più piccolo perché il padding è costoso
+    ):
+        # La classe base richiede move_vocab — passiamo un dict vuoto
+        # perché PointerMCTS non lo usa mai
+        super().__init__(
+            model            = model,
+            move_vocab       = {},
+            device           = device,
+            c_puct           = c_puct,
+            dirichlet_alpha  = dirichlet_alpha,
+            dirichlet_epsilon = dirichlet_epsilon,
+            batch_size       = batch_size,
+        )
+        self.vocab_size = 1
+        self.model = model
+ 
+    # ------------------------------------------------------------------
+    # Board → tensore (1, 13, 8, 8)
+    # ------------------------------------------------------------------
+ 
+    def _board_to_tensor(self, board: chess.Board) -> torch.Tensor:
+        return encode_board(board.fen()).unsqueeze(0).to(self.device)
+ 
+    # ------------------------------------------------------------------
+    # Batch inference — restituisce prior per mosse e valori
+    #
+    # A differenza della classe base, qui non restituiamo logits su un
+    # vocabolario fisso. Restituiamo direttamente i probs sulle mosse
+    # legali di ogni nodo, già normalizzati.
+    #
+    # Formato output:
+    #   policy_batch : lista di dict {chess.Move: float} (prior per nodo)
+    #   value_batch  : Tensor (N,) su CPU
+    # ------------------------------------------------------------------
+ 
+    @torch.no_grad()
+    def _infer_batch(
+        self,
+        batch: torch.Tensor,    # (N, 13, 8, 8) già su device — ignorato qui
+        nodes: list[MCTSNode],
+    ) -> tuple[list[dict], torch.Tensor]:
+        """
+        Sovrascrive la classe base.
+        Restituisce:
+            policy_batch : lista di N dict {chess.Move: float}
+            value_batch  : Tensor (N,) su CPU
+        """
+        self.model.eval()
+ 
+        board_tensors = []
+        moves_tensors = []
+        move_lists    = []
+        n_moves_per   = []
+ 
+        for node in nodes:
+            legal_moves = list(node.board.legal_moves)
+            move_lists.append(legal_moves)
+            n_moves_per.append(len(legal_moves))
+            board_tensors.append(encode_board(node.board.fen()))
+            moves_tensors.append(encode_legal_moves(node.board))   # (n_i, 46)
+ 
+        # Padding delle mosse al massimo del batch
+        max_n    = max(n_moves_per)
+        B        = len(nodes)
+        boards_t = torch.stack(board_tensors).to(self.device)      # (B, 13, 8, 8)
+ 
+        moves_padded = torch.zeros(B, max_n, MOVE_VECTOR_DIM, device=self.device)
+        move_mask    = torch.zeros(B, max_n, dtype=torch.bool,    device=self.device)
+ 
+        for i, m in enumerate(moves_tensors):
+            n = m.shape[0]
+            moves_padded[i, :n] = m.to(self.device)
+            move_mask[i, :n]    = True
+ 
+        # Forward pass unica
+        logits, probs, value_pred = self.model(boards_t, moves_padded, move_mask)
+        # logits: (B, max_n), probs: (B, max_n), value_pred: (B, 1)
+ 
+        # Costruisci dict prior per ogni nodo
+        policy_batch = []
+        for i, legal_moves in enumerate(move_lists):
+            n      = n_moves_per[i]
+            p      = probs[i, :n].cpu()         # (n_i,) già normalizzati
+            prior  = {move: p[j].item() for j, move in enumerate(legal_moves)}
+            policy_batch.append(prior)
+ 
+        value_batch = value_pred.squeeze(-1).cpu()   # (B,)
+ 
+        return policy_batch, value_batch
+ 
+    # ------------------------------------------------------------------
+    # Sovrascrittura _expand_batch per usare il nuovo formato di _infer_batch
+    # ------------------------------------------------------------------
+ 
+    def _expand_batch(self, nodes: list[MCTSNode]) -> list[float]:
+        valid = [n for n in nodes if not n.is_terminal]
+        if not valid:
+            return [self._terminal_value(n) for n in nodes]
+ 
+        # board_batch non serve alla nostra _infer_batch (la ricostruisce internamente)
+        # ma la firma della classe base lo richiede — passiamo un tensore dummy
+        dummy_batch = torch.zeros(len(valid), 13, 8, 8, device=self.device)
+        policy_batch, value_batch = self._infer_batch(dummy_batch, valid)
+ 
+        values = []
+        for i, node in enumerate(valid):
+            prior_dict   = policy_batch[i]   # {chess.Move: float}
+            value_scalar = value_batch[i].item()
+ 
+            legal_moves = list(node.board.legal_moves)
+            if not legal_moves:
+                node.is_terminal = True
+                values.append(self._terminal_value(node))
+                continue
+ 
+            node.is_expanded = True
+ 
+            for move in legal_moves:
+                child_board = node.board.copy()
+                child_board.push(move)
+                node.children[move] = MCTSNode(
+                    board  = child_board,
+                    prior  = prior_dict.get(move, 1e-8),
+                    parent = node,
+                    move   = move,
+                )
+            values.append(value_scalar)
+ 
+        return values
+ 
+    # ------------------------------------------------------------------
+    # _masked_softmax non serve — sovrascriviamo per evitare chiamate accidentali
+    # ------------------------------------------------------------------
+ 
+    def _masked_softmax(self, logits, legal_moves):
+        raise NotImplementedError(
+            "PointerMCTS non usa _masked_softmax — i prior vengono da _infer_batch."
+        )

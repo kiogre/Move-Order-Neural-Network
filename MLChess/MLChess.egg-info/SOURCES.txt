@@ -8,6 +8,7 @@ MLChess.egg-info/requires.txt
 MLChess.egg-info/top_level.txt
 MLChess/Models/MHA.py
 MLChess/Models/MPNN.py
+MLChess/Models/Pointer_model.py
 MLChess/Models/graph_models.py
 MLChess/Models/mcts.py
 MLChess/Models/my_resnet.py
