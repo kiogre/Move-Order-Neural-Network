@@ -9,3 +9,5 @@ chess_phase2_best.pt
 chess_phase1_best.pt
 best.pt
 last.pt
+last_buffer.pkl
+best_buffer.pkl

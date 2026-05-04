@@ -38,7 +38,7 @@ AZ_CHECKPOINT_DIR     = "checkpoints_az"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 EPOCHS            = 500
-GAMES_PER_EPOCH   = 32            # partite self-play per epoca (MCTS è lento)
+GAMES_PER_EPOCH   = 40 #32            # partite self-play per epoca (MCTS è lento)
 MAX_MOVES         = 300           # tetto mosse per partita
 
 # MCTS
@@ -59,7 +59,7 @@ LR_HEADS          = 1e-4
 
 # Frozen opponent
 EVAL_GAMES        = 20
-WINRATE_THRESHOLD = 0.55
+WINRATE_THRESHOLD = 0.52 #0.55
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +316,9 @@ def main():
 
     main_model   = JellyFishPointer().to(DEVICE)
     frozen_model = JellyFishPointer().to(DEVICE)
+
+    main_model = torch.compile(main_model)
+    frozen_model = torch.compile(frozen_model)
 
     optimizer = build_optimizer(main_model)
     scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=20)
