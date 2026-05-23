@@ -18,7 +18,7 @@ MOVE_VECTOR_DIM = 46
 # Configurazione
 # ---------------------------------------------------------------------------
 
-SUPERVISED_CHECKPOINT = "checkpoints_pointer/best.pt"
+SUPERVISED_CHECKPOINT = "checkpoints_value/best.pt"
 RL_CHECKPOINT_DIR     = "checkpoints_rl"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,7 +29,7 @@ MAX_MOVES         = 300       # tetto mosse per evitare partite infinite
 
 # Valutazione avversario
 EVAL_GAMES        = 40        # partite per valutare il winrate contro frozen
-WINRATE_THRESHOLD = 0.55      # soglia per aggiornare la copia frozen
+WINRATE_THRESHOLD = 0.52 #0.55      # soglia per aggiornare la copia frozen
 
 # PPO
 PPO_EPOCHS        = 4
@@ -175,7 +175,7 @@ def play_game_selfplay(
     elif result == "0-1":
         terminal_reward = -1.0 if main_is_white else 1.0
     else:
-        terminal_reward = -0.1
+        terminal_reward = 0.0
 
     # Assegna reward solo all'ultimo step
     if trajectory:
@@ -372,7 +372,10 @@ def save_checkpoint(state: dict, path: str):
 
 def load_checkpoint(path, model, optimizer, scheduler):
     ckpt        = torch.load(path, map_location=DEVICE)
-    model.load_state_dict(ckpt["model"])
+    state_dict = ckpt["model"]
+    if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
     if "optimizer" in ckpt:
         optimizer.load_state_dict(ckpt["optimizer"])
     if "scheduler" in ckpt and scheduler is not None:
@@ -409,6 +412,8 @@ def main():
         )
         start_epoch += 1
         if frozen_sd is not None:
+            if any(k.startswith("_orig_mod.") for k in frozen_sd.keys()):
+                frozen_sd = {k.replace("_orig_mod.", ""): v for k, v in frozen_sd.items()}
             frozen_model.load_state_dict(frozen_sd)
         else:
             frozen_model.load_state_dict(main_model.state_dict())
@@ -416,8 +421,11 @@ def main():
     elif os.path.exists(SUPERVISED_CHECKPOINT):
         print(f"Carico supervised: {SUPERVISED_CHECKPOINT}")
         ckpt = torch.load(SUPERVISED_CHECKPOINT, map_location=DEVICE)
-        main_model.load_state_dict(ckpt["model"])
-        frozen_model.load_state_dict(ckpt["model"])  # frozen parte uguale a main
+        state_dict = ckpt["model"]
+        if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
+            state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+        main_model.load_state_dict(state_dict)
+        frozen_model.load_state_dict(state_dict)  # frozen parte uguale a main
 
     else:
         print("Nessun checkpoint trovato, parto da zero.")
@@ -466,7 +474,7 @@ def main():
 
             if terminal_reward > 0:
                 wins += 1
-            elif terminal_reward == -0.1:
+            elif terminal_reward == 0.0:
                 draws += 1
             else:
                 losses += 1

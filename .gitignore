@@ -11,3 +11,6 @@ best.pt
 last.pt
 last_buffer.pkl
 best_buffer.pkl
+chessData.csv
+filtered_games.csv
+lichess_db_standard_rated_2025-12.pgn.zst

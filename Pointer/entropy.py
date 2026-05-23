@@ -2,12 +2,15 @@ import chess
 import torch
 from MLChess import encode_board, encode_legal_moves, JellyFishPointer
 
-CHECKPOINT = "checkpoints_pointer/last.pt"
+CHECKPOINT = "checkpoints_az/last.pt"
 DEVICE = torch.device("cuda")
 
 model = JellyFishPointer().to(DEVICE)
 ckpt = torch.load(CHECKPOINT, map_location=DEVICE)
-model.load_state_dict(ckpt["model"])
+state_dict = ckpt["model"]
+if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
+    state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+model.load_state_dict(state_dict)
 model.eval()
 
 board = chess.Board()  # posizione iniziale
