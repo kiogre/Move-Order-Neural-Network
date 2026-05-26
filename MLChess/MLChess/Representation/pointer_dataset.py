@@ -53,47 +53,37 @@ MOVE_VECTOR_DIM = 46  # Dimensione del vettore di encoding di ogni mossa
 # ---------------------------------------------------------------------------
 
 def encode_board(fen: str) -> torch.Tensor:
-    """
-    Codifica una posizione FEN in un tensore (13, 8, 8).
-
-    Piani 0-11: pezzi (6 bianchi + 6 neri)
-    Piano 12:   turno (1.0 = bianco, 0.0 = nero)
-    """
+    board = chess.Board(fen)
     board_planes = torch.zeros((13, 8, 8), dtype=torch.float32)
-
-    board_fen, turn = fen.split(' ')[0], fen.split(' ')[1]
-
-    rows = board_fen.split('/')
-    for rank_idx, row in enumerate(rows):
-        file_idx = 0
-        for char in row:
-            if char.isdigit():
-                file_idx += int(char)
-            elif char in PIECE_TO_PLANE:
-                board_planes[PIECE_TO_PLANE[char], rank_idx, file_idx] = 1.0
-                file_idx += 1
-
-    board_planes[12, :, :] = 1.0 if turn == 'w' else 0.0
-
+    
+    flip = board.turn == chess.BLACK  # flippa se è il turno del nero
+    
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if piece is None:
+            continue
+        
+        # Se flippiamo, specchiamo il rank e invertiamo il colore
+        rank = chess.square_rank(square)
+        file = chess.square_file(square)
+        if flip:
+            rank = 7 - rank
+        
+        # Pezzo del giocatore corrente → piani 0-5
+        # Pezzo dell'avversario → piani 6-11
+        is_current_player = (piece.color == chess.WHITE) != flip
+        plane_offset = 0 if is_current_player else 6
+        plane = plane_offset + (piece.piece_type - 1)
+        board_planes[plane, rank, file] = 1.0
+    
+    board_planes[12, :, :] = 1.0  # sempre il turno del giocatore corrente
     return board_planes
 
 
 def encode_move(move: chess.Move, board: chess.Board) -> torch.Tensor:
-    """
-    Codifica una singola mossa come vettore float32 di dimensione MOVE_VECTOR_DIM (46).
-
-    Layout:
-        [0:6]   piece_type  (one-hot, 6 valori)
-        [6:14]  from_row    (one-hot, 8 valori)
-        [14:22] from_col    (one-hot, 8 valori)
-        [22:30] to_row      (one-hot, 8 valori)
-        [30:38] to_col      (one-hot, 8 valori)
-        [38]    capture     (0/1)
-        [39]    en_passant  (0/1)
-        [40]    castling    (0/1)
-        [41:46] promotion   (one-hot, 5 valori: none/Q/R/B/N)
-    """
     vec = torch.zeros(MOVE_VECTOR_DIM, dtype=torch.float32)
+
+    flip = board.turn == chess.BLACK
 
     from_sq = move.from_square
     to_sq   = move.to_square
@@ -102,6 +92,11 @@ def encode_move(move: chess.Move, board: chess.Board) -> torch.Tensor:
     from_col = chess.square_file(from_sq)
     to_row   = chess.square_rank(to_sq)
     to_col   = chess.square_file(to_sq)
+
+    # Flippa i rank se è il turno del nero
+    if flip:
+        from_row = 7 - from_row
+        to_row   = 7 - to_row
 
     # Tipo di pezzo sulla casa di partenza
     piece = board.piece_at(from_sq)
@@ -125,12 +120,11 @@ def encode_move(move: chess.Move, board: chess.Board) -> torch.Tensor:
     # Arrocco
     vec[40] = 1.0 if board.is_castling(move) else 0.0
 
-    # Promozione (one-hot a 5 valori)
+    # Promozione
     promo_idx = PROMO_TO_IDX.get(move.promotion, 0)
     vec[41 + promo_idx] = 1.0
 
     return vec
-
 
 def encode_legal_moves(board: chess.Board) -> torch.Tensor:
     """

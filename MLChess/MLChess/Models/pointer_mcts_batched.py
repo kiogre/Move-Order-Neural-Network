@@ -65,7 +65,7 @@ class MCTSNode:
         self.visit_count   = 0
         self.value_sum     = 0.0
         self.is_expanded   = False
-        self.is_terminal   = board.is_game_over()
+        self.is_terminal   = board.is_game_over(claim_draw=True)
         self._board_tensor: Optional[torch.Tensor] = None
         self._legal_moves:  Optional[list]         = None
 
@@ -207,6 +207,7 @@ class BatchedPointerMCTS:
             terminals   : lista di n_games reward terminali (+1 / 0 / -1)
         """
         self.model.eval()
+        self._current_max_moves = max_moves  # usato da _make_frozen_moves_batched
 
         if start_fens is None:
             start_fens = [None] * n_games
@@ -218,6 +219,7 @@ class BatchedPointerMCTS:
 
         # Espandi le radici di tutte le partite in un unico batch
         self._expand_roots_batched(games)
+
 
         # Loop principale
         while True:
@@ -249,6 +251,7 @@ class BatchedPointerMCTS:
             main_active = [
                 g for g in games
                 if not g.done
+                and g.root is not None
                 and (g.board.turn == chess.WHITE) == g.main_is_white
             ]
             if not main_active:
@@ -359,7 +362,10 @@ class BatchedPointerMCTS:
         for g in games:
             terminal = self._game_terminal(g)
             for step in g.steps:
-                step["value_target"] = terminal
+                # chi muoveva in questo step?
+                board_turn = chess.Board(step["board_fen"]).turn
+                is_main = (board_turn == chess.WHITE) == g.main_is_white
+                step["value_target"] = terminal if is_main else -terminal
             all_steps.append(g.steps)
             terminals_list.append(terminal)
 
@@ -426,7 +432,7 @@ class BatchedPointerMCTS:
         valid_games   = []
 
         for g in games:
-            if g.done or g.board.is_game_over() or g.move_num >= 300:
+            if g.done or g.board.is_game_over() or g.move_num >= self._current_max_moves:
                 self._finalize_game(g)
                 continue
             legal_moves = list(g.board.legal_moves)
@@ -471,7 +477,7 @@ class BatchedPointerMCTS:
             g.board.push(move)
             g.move_num += 1
 
-            if g.board.is_game_over() or g.move_num >= 300:
+            if g.board.is_game_over() or g.move_num >= self._current_max_moves:
                 self._finalize_game(g)
             elif g.root is None:
                 # Root non disponibile: costruisci fresco (avviene raramente
@@ -607,7 +613,7 @@ class BatchedPointerMCTS:
     # ------------------------------------------------------------------
 
     def _terminal_value(self, node: MCTSNode) -> float:
-        outcome = node.board.outcome()
+        outcome = node.board.outcome(claim_draw=True)
         if outcome is None or outcome.winner is None:
             return 0.0
         return 1.0 if outcome.winner != node.board.turn else -1.0

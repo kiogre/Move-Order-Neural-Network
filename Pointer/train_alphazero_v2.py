@@ -40,7 +40,7 @@ MOVE_VECTOR_DIM = 46
 # Configurazione
 # ---------------------------------------------------------------------------
 
-SUPERVISED_CHECKPOINT = "checkpoints_rl/last.pt"
+SUPERVISED_CHECKPOINT = "checkpoints_lichess/best.pt"
 AZ_CHECKPOINT_DIR     = "checkpoints_az_v2"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -461,6 +461,10 @@ def main():
             max_moves       = MAX_MOVES,
             start_fens      = start_fens,
         )
+
+        tqdm.write(f"  Debug: len(all_steps)={len(all_steps)}, "
+           f"steps per game={[len(s) for s in all_steps[:5]]}, "
+           f"new_steps={new_steps}")
 
         for steps, terminal in zip(all_steps, terminals):
             replay_buffer.extend(steps)

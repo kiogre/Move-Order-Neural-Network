@@ -62,7 +62,7 @@ class MCTSNode:
         self.visit_count   = 0
         self.value_sum     = 0.0
         self.is_expanded   = False
-        self.is_terminal   = board.is_game_over()
+        self.is_terminal   = board.is_game_over(claim_draw=True)
         # Cache non ancora popolata
         self._board_tensor: Optional[torch.Tensor] = None
         self._legal_moves:  Optional[list]         = None
@@ -322,7 +322,7 @@ class MCTS:
     # ------------------------------------------------------------------
 
     def _terminal_value(self, node: MCTSNode) -> float:
-        outcome = node.board.outcome()
+        outcome = node.board.outcome(claim_draw=True)
         if outcome is None or outcome.winner is None:
             return 0.0
         return 1.0 if outcome.winner != node.board.turn else -1.0

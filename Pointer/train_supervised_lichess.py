@@ -48,12 +48,12 @@ CHECKPOINT_OUT   = os.path.join(CHECKPOINT_DIR, "last.pt")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Training
-TOTAL_EPOCHS   = 30
-FREEZE_EPOCHS  = 5 #10          # prime N epoche: backbone congelato, solo heads
-BATCH_SIZE     = 256
-LR_BACKBONE    = 1e-5 #5e-6        # molto basso — il backbone ha già imparato qualcosa
-LR_HEADS       = 5e-4
-VALUE_LOSS_WEIGHT = 2.0      # più basso che nel RL perché il segnale MC è già coerente
+TOTAL_EPOCHS      = 30
+FREEZE_EPOCHS     = 0        # nessun freeze — pesi random, tutto da imparare
+BATCH_SIZE        = 256
+LR_BACKBONE       = 1e-3     # stesso LR per tutto
+LR_HEADS          = 1e-3
+VALUE_LOSS_WEIGHT = 2.0
 
 # Dataset
 MAX_SAMPLES    = 2_000_000   # campiona al massimo N posizioni dal CSV
