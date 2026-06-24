@@ -1,11 +1,33 @@
 """
-pointer_mcts_batched.py — MCTS batched per JellyFishPointer.
+pointer_mcts_batched.py — MCTS batched per JellyFishPointer (self-play simmetrico).
 
 Invece di fare MCTS per una partita alla volta, gestisce N partite in parallelo
 e raccoglie le foglie di tutti gli alberi in un unico batch per la forward pass.
 Questo satura la GPU con batch grandi invece di tante forward pass piccole.
 
-Ottimizzazioni rispetto alla versione precedente:
+CAMBIAMENTO RISPETTO ALLA VERSIONE PRECEDENTE — SELF-PLAY SIMMETRICO:
+  In precedenza, ogni partita era "main" (gioca con MCTS completo) vs "frozen"
+  (stessa rete, mossa greedy senza ricerca, da self.model). Questo produceva
+  partite strutturalmente sbilanciate (MCTS batte quasi sempre la policy nuda
+  della stessa rete) e un avversario non realistico.
+
+  Ora ENTRAMBI i lati giocano con MCTS completo (stessa rete), ed entrambi i
+  lati vengono registrati come step per il replay buffer. Questo:
+    - raddoppia (circa) gli step utili per partita a parità di partite;
+    - rende le partite competitive per costruzione (stessa forza sui due lati);
+    - allena "main" contro un vero avversario con ricerca, non un fantoccio.
+
+  Costo: il self-play richiede circa il doppio di simulazioni MCTS per partita
+  (entrambi i lati fanno num_simulations simulazioni ad ogni mossa, invece di
+  uno solo). Se il tempo per epoca cresce troppo, riduci GAMES_PER_EPOCH.
+
+  NOTA sui risultati: play_games_batched ora ritorna i terminal value DAL
+  PUNTO DI VISTA DEL BIANCO (+1 = vince il Bianco, -1 = vince il Nero,
+  0 = pareggio). Prima erano dal punto di vista di "main". Questo permette
+  di monitorare direttamente eventuali squilibri bianco/nero nelle partite
+  di self-play.
+
+Ottimizzazioni mantenute dalla versione precedente:
   - Tree reuse: dopo ogni mossa il sottoalbero viene riusato invece di essere
     ricostruito. Il risparmio è proporzionale a visit_count del figlio scelto.
   - Cache board_tensor e legal_moves nel nodo (encode_board chiamato una volta
@@ -13,17 +35,13 @@ Ottimizzazioni rispetto alla versione precedente:
   - Deduplicazione foglie in play_games_batched: nel loop principale le foglie
     di tutti gli alberi vengono deduplicate prima della forward pass.
   - FPU (First Play Urgency): nodi non visitati usano fpu_value invece di Q=0.
-  - Bug fix sims_remaining: il contatore viene decrementato per step, non per
-    foglia — era moltiplicato per leaves_per_tree nella versione precedente.
-  - Bug fix frozen move + tree reuse: dopo la mossa del frozen, il root del
-    main viene avanzato al figlio corrispondente se presente nell'albero,
-    invece di essere sempre ricostruito da zero.
-  - Frozen move greedy senza espansione root: il frozen non richiede MCTS,
-    usa la forward pass diretta con argmax sui probs.
+  - puct_score e _terminal_value: convenzione di segno corretta (Q del figlio
+    e' dal punto di vista di chi muove nel figlio; per la selezione al
+    genitore va negato).
 
-Utilizzo in train_alphazero_batched.py:
+Utilizzo in train_alphazero_v3.py:
     mcts = BatchedPointerMCTS(model, device)
-    all_steps, terminals = mcts.play_games_batched(n_games=64, num_simulations=50)
+    all_steps, white_results = mcts.play_games_batched(n_games=64, num_simulations=150)
 """
 
 import math
@@ -48,6 +66,7 @@ class MCTSNode:
         "children", "visit_count", "value_sum",
         "is_expanded", "is_terminal",
         "_board_tensor", "_legal_moves",
+        "virtual_loss",
     )
 
     def __init__(
@@ -68,6 +87,7 @@ class MCTSNode:
         self.is_terminal   = board.is_game_over(claim_draw=True)
         self._board_tensor: Optional[torch.Tensor] = None
         self._legal_moves:  Optional[list]         = None
+        self.virtual_loss: int = 0
 
     @property
     def board(self) -> chess.Board:
@@ -86,15 +106,20 @@ class MCTSNode:
 
     @property
     def Q(self) -> float:
-        return self.value_sum / self.visit_count if self.visit_count > 0 else 0.0
+        total_visits = self.visit_count + self.virtual_loss
+        if total_visits == 0:
+            return 0.0
+        # Virtual loss penalizza come se le visite pendenti fossero tutte -1
+        return (self.value_sum - self.virtual_loss) / total_visits
 
     def puct_score(self, c_puct: float, fpu_value: float = -0.1) -> float:
         assert self.parent is not None
-        q = fpu_value if self.visit_count == 0 else self.Q
+        total_visits = self.visit_count + self.virtual_loss
+        q = fpu_value if total_visits == 0 else -self.Q
         u = (
             c_puct * self.prior
-            * math.sqrt(self.parent.visit_count)
-            / (1 + self.visit_count)
+            * math.sqrt(self.parent.visit_count + self.parent.virtual_loss)
+            / (1 + total_visits)
         )
         return q + u
 
@@ -110,14 +135,13 @@ class MCTSNode:
 # ---------------------------------------------------------------------------
 
 class GameState:
-    def __init__(self, game_idx: int, main_is_white: bool, start_fen: Optional[str] = None):
-        self.game_idx      = game_idx
-        self.main_is_white = main_is_white
-        self.board         = chess.Board(start_fen) if start_fen else chess.Board()
+    def __init__(self, game_idx: int, start_fen: Optional[str] = None):
+        self.game_idx = game_idx
+        self.board    = chess.Board(start_fen) if start_fen else chess.Board()
         self.steps: list[dict] = []
-        self.move_num      = 0
-        self.done          = False
-        self.result        = None
+        self.move_num = 0
+        self.done     = False
+        self.result   = None
 
         # Albero MCTS corrente — sopravvive tra mosse (tree reuse)
         self.root: Optional[MCTSNode] = None
@@ -143,7 +167,7 @@ class BatchedPointerMCTS:
         fpu_value:         float = -0.1,
         dirichlet_alpha:   float = 0.3,
         dirichlet_epsilon: float = 0.25,
-        leaves_per_tree:   int   = 4,
+        leaves_per_tree:   int   = 32,
     ):
         self.model             = model
         self.device            = device
@@ -166,6 +190,7 @@ class BatchedPointerMCTS:
         root = MCTSNode(board.copy())
         self._expand_nodes_batched([root])
         self._add_dirichlet_noise(root)
+        root.visit_count = 1
         root = self._run_simulations_single(root, num_simulations)
         return self._select_move(root, temperature)
 
@@ -178,6 +203,7 @@ class BatchedPointerMCTS:
         root = MCTSNode(board.copy())
         self._expand_nodes_batched([root])
         self._add_dirichlet_noise(root)
+        root.visit_count = 1
         root = self._run_simulations_single(root, num_simulations)
         return self._visit_distribution(root, temperature)
 
@@ -196,30 +222,31 @@ class BatchedPointerMCTS:
         start_fens:      Optional[list[Optional[str]]] = None,
     ) -> tuple[list[list[dict]], list[float]]:
         """
-        Gioca n_games partite in parallelo (main model vs se stesso).
+        Gioca n_games partite in parallelo, self-play simmetrico (stessa rete
+        con MCTS completo su entrambi i lati).
 
         Args:
             start_fens: lista opzionale di FEN di partenza (len == n_games).
                         None per posizione iniziale standard.
 
         Returns:
-            all_steps   : lista di n_games liste di step per il replay buffer
-            terminals   : lista di n_games reward terminali (+1 / 0 / -1)
+            all_steps     : lista di n_games liste di step per il replay buffer
+                             (step di ENTRAMBI i lati)
+            white_results : lista di n_games esiti dal punto di vista del
+                             Bianco (+1 / 0 / -1)
         """
         self.model.eval()
-        self._current_max_moves = max_moves  # usato da _make_frozen_moves_batched
 
         if start_fens is None:
             start_fens = [None] * n_games
 
         games = [
-            GameState(i, main_is_white=(i % 2 == 0), start_fen=start_fens[i])
+            GameState(i, start_fen=start_fens[i])
             for i in range(n_games)
         ]
 
         # Espandi le radici di tutte le partite in un unico batch
         self._expand_roots_batched(games)
-
 
         # Loop principale
         while True:
@@ -227,69 +254,48 @@ class BatchedPointerMCTS:
             if not active:
                 break
 
-            # ---- Mosse del frozen (greedy, senza MCTS) ----
-            # Il frozen gioca tutte le sue mosse prima di raccogliere foglie
-            # per il main, così il batch successivo è tutto del main.
-            frozen_active = [
-                g for g in active
-                if not g.done
-                and not g.board.is_game_over()
-                and g.move_num < max_moves
-                and (g.board.turn == chess.WHITE) != g.main_is_white
-            ]
-            if frozen_active:
-                self._make_frozen_moves_batched(frozen_active)
-                # Ricalcola active dopo le mosse frozen
-                active = [g for g in games if not g.done]
-
-            # Controlla terminazione
+            # Controlla terminazione (es. posizioni curriculum già finite)
             for g in active:
                 if g.board.is_game_over() or g.move_num >= max_moves:
                     self._finalize_game(g)
 
-            # Partite dove è il turno del main
-            main_active = [
-                g for g in games
-                if not g.done
-                and g.root is not None
-                and (g.board.turn == chess.WHITE) == g.main_is_white
-            ]
-            if not main_active:
-                continue
+            active = [g for g in games if not g.done]
+            if not active:
+                break
 
-            # ---- Simulazioni MCTS per il main ----
+            # ---- Simulazioni MCTS per tutte le partite attive ----
             # Ogni partita ha bisogno di num_simulations simulazioni.
             # Contiamo per step (un passo = leaves_per_tree foglie per albero).
             steps_needed = {g.game_idx: math.ceil(num_simulations / self.leaves_per_tree)
-                            for g in main_active}
+                            for g in active}
 
             while True:
-                current = [g for g in main_active
+                current = [g for g in active
                            if not g.done and steps_needed[g.game_idx] > 0]
                 if not current:
                     break
 
                 # Raccogli foglie da tutti gli alberi attivi
-                all_pairs: list[tuple[GameState, MCTSNode]] = []
+                # all_triples: (GameState, leaf_node, path_to_leaf)
+                all_triples: list[tuple] = []
                 for g in current:
-                    leaves = self._select_leaves(g.root)
-                    for leaf in leaves:
-                        all_pairs.append((g, leaf))
+                    leaf_path_pairs = self._select_leaves(g.root)
+                    for leaf, path in leaf_path_pairs:
+                        all_triples.append((g, leaf, path))
 
-                # Deduplica per id del nodo (cross-tree: raro ma possibile
-                # con transposition table futura; intra-tree: comune)
+                # Deduplica per id del nodo (intra-tree: comune)
                 seen_ids: dict[int, int] = {}
                 unique_pairs: list[tuple[GameState, MCTSNode]] = []
-                for pair in all_pairs:
-                    nid = id(pair[1])
+                for g, leaf, path in all_triples:
+                    nid = id(leaf)
                     if nid not in seen_ids:
                         seen_ids[nid] = len(unique_pairs)
-                        unique_pairs.append(pair)
+                        unique_pairs.append((g, leaf))
 
                 to_expand = [(g, n) for g, n in unique_pairs
                              if not n.is_terminal and not n.is_expanded]
-                terminals  = [(g, n) for g, n in unique_pairs
-                              if n.is_terminal or n.is_expanded]
+                terminals = [(g, n) for g, n in unique_pairs
+                             if n.is_terminal or n.is_expanded]
 
                 value_map: dict[int, float] = {}
                 if to_expand:
@@ -301,16 +307,17 @@ class BatchedPointerMCTS:
                     value_map[id(n)] = self._terminal_value(n)
 
                 # Backprop su tutte le foglie originali (inclusi duplicati)
-                for g, leaf in all_pairs:
+                # _backpropagate rimuove anche la virtual loss dal path
+                for g, leaf, path in all_triples:
                     v = value_map.get(id(leaf), 0.0)
-                    self._backpropagate(leaf, v)
+                    self._backpropagate(leaf, v, path)
 
                 # Decrementa contatore per partita (uno step = un giro di foglie)
                 for g in current:
                     steps_needed[g.game_idx] -= 1
 
-            # ---- Scegli mossa per ogni partita del main ----
-            for g in main_active:
+            # ---- Scegli mossa per ogni partita attiva ----
+            for g in active:
                 if g.done or g.board.is_game_over() or g.move_num >= max_moves:
                     self._finalize_game(g)
                     continue
@@ -318,24 +325,25 @@ class BatchedPointerMCTS:
                 temp = temp_high if g.move_num < temp_threshold else temp_low
                 move = self._select_move(g.root, temp)
 
-                # Salva step per il replay buffer
+                # Salva step per il replay buffer (entrambi i lati)
                 legal_moves_list = g.root.legal_moves
                 legal_moves_t    = encode_legal_moves(g.board)
                 policy_target    = self._visit_distribution(g.root, temp)
 
-                target_vec = torch.zeros(len(legal_moves_list))
-                for j, m in enumerate(legal_moves_list):
-                    target_vec[j] = policy_target.get(m, 0.0)
-                s = target_vec.sum()
-                if s > 0:
-                    target_vec = target_vec / s
+                if policy_target:  # salta se children vuoti
+                    target_vec = torch.zeros(len(legal_moves_list))
+                    for j, m in enumerate(legal_moves_list):
+                        target_vec[j] = policy_target.get(m, 0.0)
+                    s = target_vec.sum()
+                    if s > 0:
+                        target_vec = target_vec / s
 
-                g.steps.append({
-                    "board_fen":     g.board.fen(),
-                    "legal_moves":   legal_moves_t,
-                    "policy_target": target_vec,
-                    "value_target":  None,  # riempito dopo
-                })
+                    g.steps.append({
+                        "board_fen":     g.board.fen(),
+                        "legal_moves":   legal_moves_t,
+                        "policy_target": target_vec,
+                        "value_target":  None,  # riempito a fine partita
+                    })
 
                 # Tree reuse: avanza il root al figlio della mossa scelta
                 if move in g.root.children:
@@ -356,20 +364,21 @@ class BatchedPointerMCTS:
                     self._add_dirichlet_noise(g.root)
                     g.root.visit_count = 1
 
-        # Assegna value_target e raccogli risultati
-        all_steps      = []
-        terminals_list = []
+        # ----------------------------------------------------------------
+        # Assegna value_target (dal punto di vista di chi muove in ogni
+        # step) e raccogli i risultati dal punto di vista del Bianco.
+        # ----------------------------------------------------------------
+        all_steps     = []
+        white_results = []
         for g in games:
-            terminal = self._game_terminal(g)
+            white_result = self._white_result(g)
             for step in g.steps:
-                # chi muoveva in questo step?
                 board_turn = chess.Board(step["board_fen"]).turn
-                is_main = (board_turn == chess.WHITE) == g.main_is_white
-                step["value_target"] = terminal if is_main else -terminal
+                step["value_target"] = white_result if board_turn == chess.WHITE else -white_result
             all_steps.append(g.steps)
-            terminals_list.append(terminal)
+            white_results.append(white_result)
 
-        return all_steps, terminals_list
+        return all_steps, white_results
 
     # ------------------------------------------------------------------
     # Simulazioni per singola posizione (valutazione)
@@ -382,8 +391,8 @@ class BatchedPointerMCTS:
     ) -> MCTSNode:
         sims_done = 1  # il root è già espanso
         while sims_done < num_simulations:
-            leaves    = self._select_leaves(root)
-            unique    = list({id(n): n for n in leaves}.values())
+            leaf_path_pairs = self._select_leaves(root)
+            unique = list({id(n): n for n, _ in leaf_path_pairs}.values())
 
             to_expand = [n for n in unique if not n.is_terminal and not n.is_expanded]
             terminals  = [n for n in unique if n.is_terminal or n.is_expanded]
@@ -395,8 +404,8 @@ class BatchedPointerMCTS:
             for n in terminals:
                 value_map[id(n)] = self._terminal_value(n)
 
-            for leaf in leaves:
-                self._backpropagate(leaf, value_map.get(id(leaf), 0.0))
+            for leaf, path in leaf_path_pairs:
+                self._backpropagate(leaf, value_map.get(id(leaf), 0.0), path)
                 sims_done += 1
 
         return root
@@ -416,91 +425,29 @@ class BatchedPointerMCTS:
             root.visit_count = 1
 
     # ------------------------------------------------------------------
-    # Mosse del frozen — batch greedy senza MCTS
-    # ------------------------------------------------------------------
-
-    @torch.no_grad()
-    def _make_frozen_moves_batched(self, games: list[GameState]):
-        """
-        Esegue le mosse greedy del frozen per tutte le partite in un unico batch.
-        Il frozen non usa MCTS — sceglie la mossa con prob massima dalla rete.
-        Dopo la mossa del frozen, il root del main viene avanzato per il tree reuse.
-        """
-        board_tensors = []
-        moves_tensors = []
-        n_moves_per   = []
-        valid_games   = []
-
-        for g in games:
-            if g.done or g.board.is_game_over() or g.move_num >= self._current_max_moves:
-                self._finalize_game(g)
-                continue
-            legal_moves = list(g.board.legal_moves)
-            if not legal_moves:
-                self._finalize_game(g)
-                continue
-            n_moves_per.append(len(legal_moves))
-            board_tensors.append(encode_board(g.board.fen()))
-            moves_tensors.append(encode_legal_moves(g.board))
-            valid_games.append(g)
-
-        if not valid_games:
-            return
-
-        max_n    = max(n_moves_per)
-        B        = len(valid_games)
-        boards_t = torch.stack(board_tensors).to(self.device)
-
-        moves_padded = torch.zeros(B, max_n, MOVE_VECTOR_DIM, device=self.device)
-        move_mask    = torch.zeros(B, max_n, dtype=torch.bool, device=self.device)
-        for i, m in enumerate(moves_tensors):
-            n = m.shape[0]
-            moves_padded[i, :n] = m.to(self.device)
-            move_mask[i, :n]    = True
-
-        _, probs, _ = self.model(boards_t, moves_padded, move_mask)
-        # probs: (B, max_n)
-
-        for i, g in enumerate(valid_games):
-            legal_moves = list(g.board.legal_moves)
-            n           = n_moves_per[i]
-            move_idx    = probs[i, :n].argmax().item()
-            move        = legal_moves[move_idx]
-
-            # Tree reuse sul root del main: avanza al figlio se esiste
-            if g.root is not None and move in g.root.children:
-                g.root = g.root.children[move]
-                g.root.parent = None
-            else:
-                g.root = None  # sarà ricostruito quando torna il turno del main
-
-            g.board.push(move)
-            g.move_num += 1
-
-            if g.board.is_game_over() or g.move_num >= self._current_max_moves:
-                self._finalize_game(g)
-            elif g.root is None:
-                # Root non disponibile: costruisci fresco (avviene raramente
-                # con alberi sufficientemente esplorati)
-                g.root = MCTSNode(g.board.copy())
-                self._expand_nodes_batched([g.root])
-                self._add_dirichlet_noise(g.root)
-                g.root.visit_count = 1
-
-    # ------------------------------------------------------------------
     # Selezione foglie da un albero
     # ------------------------------------------------------------------
 
-    def _select_leaves(self, root: MCTSNode) -> list[MCTSNode]:
-        leaves = []
+    def _select_leaves(self, root: MCTSNode) -> list[tuple]:
+        """
+        Seleziona leaves_per_tree foglie applicando virtual loss durante la discesa.
+        Ritorna lista di (leaf, path) dove path include i nodi visitati (fog inclusa).
+        La virtual loss diversifica le traiettorie successive nello stesso step.
+        Viene rimossa durante il backprop reale in _backpropagate.
+        """
+        results = []
         for _ in range(self.leaves_per_tree):
             node = root
+            path_nodes = []
             while node.is_expanded and not node.is_terminal:
                 if not node.children:
                     break
                 node = node.best_child(self.c_puct, self.fpu_value)
-            leaves.append(node)
-        return leaves
+                path_nodes.append(node)
+            for n in path_nodes:
+                n.virtual_loss += 1
+            results.append((node, path_nodes))
+        return results
 
     # ------------------------------------------------------------------
     # Espansione batch — forward pass unica per N nodi unici
@@ -569,7 +516,14 @@ class BatchedPointerMCTS:
     # Backpropagation
     # ------------------------------------------------------------------
 
-    def _backpropagate(self, node: MCTSNode, value: float):
+    def _backpropagate(self, node: MCTSNode, value: float, path: list):
+        """
+        Backpropaga value risalendo l'albero da node fino alla radice.
+        Rimuove la virtual loss dai nodi in path (applicata in _select_leaves).
+        """
+        # Rimuovi virtual loss prima di aggiornare i contatori reali
+        for n in path:
+            n.virtual_loss -= 1
         current = node
         while current is not None:
             current.visit_count += 1
@@ -599,6 +553,8 @@ class BatchedPointerMCTS:
         self, root: MCTSNode, temperature: float
     ) -> dict[chess.Move, float]:
         moves  = list(root.children.keys())
+        if not moves:
+            return {}
         counts = [root.children[m].visit_count for m in moves]
         # Temperatura <= 0.05: one-hot sul massimo per evitare overflow in v^(1/temp)
         if temperature <= 0.05:
@@ -616,19 +572,20 @@ class BatchedPointerMCTS:
         outcome = node.board.outcome(claim_draw=True)
         if outcome is None or outcome.winner is None:
             return 0.0
-        return 1.0 if outcome.winner != node.board.turn else -1.0
+        return 1.0 if outcome.winner == node.board.turn else -1.0
 
     def _finalize_game(self, g: GameState):
         if not g.done:
             g.done   = True
             g.result = g.board.result()
 
-    def _game_terminal(self, g: GameState) -> float:
+    def _white_result(self, g: GameState) -> float:
+        """Esito della partita dal punto di vista del Bianco: +1/-1/0."""
         result = g.result or g.board.result()
         if result == "1-0":
-            return  1.0 if g.main_is_white else -1.0
+            return 1.0
         elif result == "0-1":
-            return -1.0 if g.main_is_white else  1.0
+            return -1.0
         return 0.0
 
     def _add_dirichlet_noise(self, root: MCTSNode):

@@ -55,27 +55,22 @@ MOVE_VECTOR_DIM = 46  # Dimensione del vettore di encoding di ogni mossa
 def encode_board(fen: str) -> torch.Tensor:
     board = chess.Board(fen)
     board_planes = torch.zeros((13, 8, 8), dtype=torch.float32)
-    
+
     flip = board.turn == chess.BLACK  # flippa se è il turno del nero
-    
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece is None:
-            continue
-        
-        # Se flippiamo, specchiamo il rank e invertiamo il colore
+
+    for square, piece in board.piece_map().items():
         rank = chess.square_rank(square)
         file = chess.square_file(square)
         if flip:
             rank = 7 - rank
-        
+
         # Pezzo del giocatore corrente → piani 0-5
         # Pezzo dell'avversario → piani 6-11
         is_current_player = (piece.color == chess.WHITE) != flip
         plane_offset = 0 if is_current_player else 6
         plane = plane_offset + (piece.piece_type - 1)
         board_planes[plane, rank, file] = 1.0
-    
+
     board_planes[12, :, :] = 1.0  # sempre il turno del giocatore corrente
     return board_planes
 

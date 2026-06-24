@@ -16,10 +16,6 @@ Differenze rispetto a train_alphazero.py (v1 sequenziale):
   - best_winrate letto da best.pt separatamente
 """
 
-###################################################################
-# REMEMBER CHANGE BACK POINTER-MCTS BATCHED THE VALUE OF THE DRAW #
-###################################################################
-
 import os
 import copy
 import math
@@ -45,7 +41,7 @@ MOVE_VECTOR_DIM = 46
 # ---------------------------------------------------------------------------
 
 SUPERVISED_CHECKPOINT = "checkpoints_lichess/best.pt"
-AZ_CHECKPOINT_DIR     = "checkpoints_az_v2"
+AZ_CHECKPOINT_DIR     = "checkpoints_az_v2_problems"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -71,12 +67,12 @@ LR_HEADS         = 5e-5
 VALUE_LOSS_WEIGHT = 3.0   # peso value loss per ricalibrazione scala predizioni
 
 # Frozen opponent
-EVAL_GAMES        = 100
+EVAL_GAMES        = 0 #100
 WINRATE_THRESHOLD = 0.55
 
 # Curriculum learning
-CURRICULUM_CSV       = "advantages_training_dataset.csv" #"../over_mate_1_tactic_evals.csv"
-CURRICULUM_PROB      = 0.30
+CURRICULUM_CSV       = "advantages_training_dataset_under_1200.csv" #"../over_mate_1_tactic_evals.csv"
+CURRICULUM_PROB      = 1.00
 CURRICULUM_MAX_MOVES = 120
 
 # Mixed buffer — campioni diretti dal dataset tattico
@@ -520,7 +516,7 @@ def main():
             replay_buffer.extend(steps)
             new_steps += len(steps)
             if terminal > 0:   wins   += 1
-            elif terminal < 0: losses += 1
+            elif terminal < -0.1: losses += 1
             else:              draws  += 1
 
         # ----------------------------------------------------------------
@@ -542,7 +538,9 @@ def main():
         # Valutazione winrate contro frozen
         # ----------------------------------------------------------------
         tqdm.write(f"  Valutazione contro frozen ({EVAL_GAMES} partite)...")
-        winrate, w, d, l = evaluate_vs_frozen(main_mcts)
+        #winrate, w, d, l = evaluate_vs_frozen(main_mcts)
+        winrate = (wins + 0.5 * draws) / (wins + draws + losses)
+        w = d = l = 0
         tqdm.write(f"  Winrate: {winrate:.3f}  (W{w}/D{d}/L{l})")
 
         frozen_updated = False

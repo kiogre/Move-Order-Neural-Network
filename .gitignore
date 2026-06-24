@@ -14,3 +14,6 @@ best_buffer.pkl
 chessData.csv
 filtered_games.csv
 lichess_db_standard_rated_2025-12.pgn.zst
+lichess_db_puzzle.csv
+advantages_training_dataset.csv
+advantages_training_dataset_under_1200.csv

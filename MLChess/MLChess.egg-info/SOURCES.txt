@@ -26,3 +26,4 @@ MLChess/Representation/With_Waves/new_graph_representation_fields.py
 MLChess/Representation/With_Waves/precompute_fields.py
 MLChess/Understanding/Chess_GCN_Explainer.py
 MLChess/Understanding/Chess_MPNN_Explainer.py
+MLChess/Understanding/Chess_Pointer_Explainer.py
