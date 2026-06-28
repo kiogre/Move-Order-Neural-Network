@@ -458,10 +458,10 @@ def main():
     az_last = os.path.join(AZ_CHECKPOINT_DIR, "last.pt")
     az_best = os.path.join(AZ_CHECKPOINT_DIR, "best.pt")
 
-    if os.path.exists(az_best):
+    if os.path.exists(az_last):
         print("Checkpoint AlphaZero trovato, riprendo...")
         start_epoch, _, _ = load_checkpoint(
-            az_best, main_model, optimizer, scheduler, replay_buffer
+            az_last, main_model, optimizer, scheduler, replay_buffer
         )
         start_epoch += 1
 

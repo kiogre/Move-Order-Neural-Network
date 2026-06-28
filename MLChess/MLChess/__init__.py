@@ -9,9 +9,10 @@ from .Representation.Siamese_Autoencoder_Representation import build_and_save_tr
 from .Models.mcts import MCTS, JellyfishMCTS, PointerMCTS
 from .Models.MHA import MHA, ChessMHA, MHA_2, ChessMHA_2, MHA_3, ChessMHA_3
 from .Representation.pointer_dataset import create_dataloaders_pointer, PointerChessDataset, collate_fn_pointer, encode_board, encode_legal_moves, encode_move
-from .Models.Pointer_model import ValueHead, PointerPolicyHead, JellyFishPointer, MoveEncoder
+from .Models.Pointer_model import ValueHead, PointerPolicyHead, JellyFishPointer, MoveEncoder, JellyFishPointerGCN, ChessTransformerLayer, ChessBoardEncoder, BoardEmbedding, JellyFishPointerTransformer
 from .Models.pointer_mcts_batched import BatchedPointerMCTS, MCTSNode
 from .Understanding.Chess_Pointer_Explainer import ChessPointerExplainer
+from .Representation.pointer_graph_dataset import encode_board_graph, encode_legal_moves, encode_result
 
 __version__ = "1.1.0"
 
@@ -24,4 +25,5 @@ __all__ = ["create_dataloaders_tensor", "MyResNet", "ChessBackbone", "FullChessM
            "ChessMHA", "MHA_2", "ChessMHA_2", "MHA_3", "ChessMHA_3", "create_dataloaders_pointer", "PointerChessDataset", "collate_fn_pointer",
            "encode_board", "encode_legal_moves", "encode_move", "MoveEncoder", "JellyFishPointer",
            "ValueHead", "PointerPolicyHead", "PointerMCTS", "BatchedPointerMCTS", "MCTSNode",
-           "ChessPointerExplainer"]
+           "ChessPointerExplainer", "JellyFishPointerGCN", "ChessTransformerLayer",
+           "ChessBoardEncoder", "BoardEmbedding", "JellyFishPointerTransformer"]

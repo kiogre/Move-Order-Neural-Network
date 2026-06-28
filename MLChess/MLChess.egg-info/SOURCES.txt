@@ -19,6 +19,7 @@ MLChess/Representation/data_organization_tensor.py
 MLChess/Representation/graph_representation.py
 MLChess/Representation/new_graph_representation.py
 MLChess/Representation/pointer_dataset.py
+MLChess/Representation/pointer_graph_dataset.py
 MLChess/Representation/With_Waves/chess_fields.py
 MLChess/Representation/With_Waves/data_organization_tensor_fields.py
 MLChess/Representation/With_Waves/dataset_with_precomputed_fields.py
