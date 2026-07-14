@@ -14,14 +14,15 @@ from MLChess import JellyFishPointer
 # Configurazione
 # ---------------------------------------------------------------------------
 
-CSV_FILE      = "../over_mate_1_tactic_evals.csv"
+# CSV_FILE      = "../over_mate_1_tactic_evals.csv"
+CSV_FILE      = "stockfish_lichess_20m.csv"
 BATCH_SIZE    = 256 #128
 NUM_WORKERS   = 4
 LR            = 1e-3
 EPOCHS        = 50
 POLICY_WEIGHT = 1.0   # peso della policy loss nella loss totale
 VALUE_WEIGHT  = 1.0   # peso della value loss nella loss totale
-CHECKPOINT_DIR = "checkpoints_pointer"
+CHECKPOINT_DIR = "checkpoints_pointer_20m"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -160,7 +161,7 @@ def main():
     print(f"Device: {DEVICE}")
     print(f"Caricamento dataset da {CSV_FILE}...")
 
-    trainloader, valloader, _ = create_dataloaders_pointer(
+    trainloader, valloader = create_dataloaders_pointer(
         csv_file=CSV_FILE,
         batch_size=BATCH_SIZE,
         num_workers=NUM_WORKERS,

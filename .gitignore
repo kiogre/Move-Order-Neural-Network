@@ -19,3 +19,9 @@ advantages_training_dataset.csv
 advantages_training_dataset_under_1200.csv
 last_divergent.pt
 last_divergent_buffer.pkl
+stockfish_lichess.csv
+stockfish_lichess_20m.csv
+meta.json
+n_children.npy
+child_fens.npy
+lichess_db_eval.jsonl.zst

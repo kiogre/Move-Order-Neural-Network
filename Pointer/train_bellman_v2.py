@@ -1,20 +1,28 @@
 """
-train_v2.py — Training supervisionato con Bellman consistency, due fasi, diagnostica.
+train_stockfish.py — Training su dataset Stockfish depth-20.
 
-Cambiamenti rispetto alla versione precedente:
-  - AdamW + weight_decay contro overfitting
-  - Fase 1 (WARMUP_EPOCHS): solo value + policy, no Bellman — identico al
-    training veloce originale, nessun overhead
-  - Fase 2: Bellman con tau che parte alto (2.0) e scende a TAU_FINAL
-  - Niente detach su value_parent: gradiente fluisce in entrambe le direzioni
-  - Bellman saltato automaticamente se value_std < soglia (collasso)
-  - Avviso se gap train/val > 0.8 (overfitting)
+Dataset atteso (CSV):
+    FEN, Evaluation, Move
+    - Evaluation: centipawn come '+150', '-80', o mate '#+2', '#-3'
+      (dal punto di vista del BIANCO, come da output Stockfish standard)
+    - Move: mossa migliore in UCI
+
+Differenze rispetto al training su partite Lichess:
+    - Value target: tanh(cp/400) invece di outcome ±1/0
+      Molto piu informativo: una posizione +100cp vale ~0.24, non +1.0
+    - Policy target: mossa migliore Stockfish (non mossa umana)
+    - Eval e' dal punto di vista del bianco -> negata se e' nero a muovere
+
+Fasi:
+    1. WARMUP_EPOCHS: MSE(eval) + CE(best move), no Bellman
+    2. Da WARMUP_EPOCHS+1: aggiunge Bellman consistency loss
 
 Utilizzo:
-  python train_v2.py
+    python train_stockfish.py
 """
 
 import os
+import math
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -25,7 +33,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 import chess
 
-from MLChess import encode_board, encode_legal_moves, JellyFishPointer
+from MLChess import encode_board, encode_legal_moves, JellyFishPointer, encode_board_fast, encode_board_batch
 
 MOVE_VECTOR_DIM = 46
 
@@ -33,41 +41,73 @@ MOVE_VECTOR_DIM = 46
 # Configurazione
 # ---------------------------------------------------------------------------
 
-FILTERED_CSV   = "filtered_games.csv"
-CHECKPOINT_IN  = "checkpoints_az_v2/last.pt"
-CHECKPOINT_DIR = "checkpoints_v2"
+STOCKFISH_CSV  = "stockfish_lichess.csv"   # FEN, Evaluation, Move
+CHECKPOINT_IN  = "checkpoints_az_v2/best.pt"    # parte da qui se esiste
+CHECKPOINT_DIR = "checkpoints_bellman"
 CHECKPOINT_OUT = os.path.join(CHECKPOINT_DIR, "last.pt")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Training
 TOTAL_EPOCHS      = 30
-FREEZE_EPOCHS     = 0
 BATCH_SIZE        = 256
-LR_BACKBONE       = 5e-4
-LR_HEADS          = 5e-4
+LR                = 5e-4
 WEIGHT_DECAY      = 1e-4
 VALUE_LOSS_WEIGHT = 2.0
 GRAD_CLIP         = 1.0
 
+# Conversione centipawn → win probability
+CP_SCALE = 400   # tanh(cp / CP_SCALE): a 400cp → 0.96, a 100cp → 0.24
+
 # Bellman
-WARMUP_EPOCHS         = 5     # epoche senza Bellman — veloci come il training originale
-BELLMAN_WEIGHT        = 0.05  # lambda piccolo — termine ausiliario
-TAU_START             = 2.0   # temperatura alta inizialmente (piu smooth)
-TAU_FINAL             = 0.5   # temperatura finale
-BELLMAN_SUBSAMPLE     = 64    # posizioni per batch per Bellman
-VALUE_COLLAPSE_THRESH = 0.05  # sotto questa soglia: salta Bellman + avviso
+WARMUP_EPOCHS         = 0
+BELLMAN_WEIGHT        = 0.1
+TAU_START             = 2.0
+TAU_FINAL             = 0.5
+BELLMAN_SUBSAMPLE     = 64
+VALUE_COLLAPSE_THRESH = 0.05
 
 # Dataset
-MAX_SAMPLES  = 2_000_000
+MAX_SAMPLES  = None    # None = usa tutto
 VAL_FRACTION = 0.02
 NUM_WORKERS  = 4
 
 # ---------------------------------------------------------------------------
-# Dataset — FEN incluso, nessuna generazione di figli qui
+# Conversione evaluation
 # ---------------------------------------------------------------------------
 
-class LichessDataset(Dataset):
+def eval_to_winprob(eval_str: str, turn: chess.Color) -> float:
+    """
+    Converte l'evaluation Stockfish (dal punto di vista del bianco)
+    in win probability dal punto di vista del giocatore che muove.
+
+    eval_str: '+150', '-80', '#+2', '#-3', '0'
+    turn:     chess.WHITE o chess.BLACK
+    """
+    s = eval_str.strip()
+
+    if s.startswith('#'):
+        # Mate score: #+N = bianco da matto in N, #-N = nero da matto in N
+        val_white = 1.0 if s.startswith('#+') else -1.0
+    else:
+        try:
+            cp = float(s)
+        except ValueError:
+            cp = 0.0
+        # Clipping conservativo per evitare saturazione a 1.0
+        cp = max(-2000.0, min(2000.0, cp))
+        val_white = math.tanh(cp / CP_SCALE)
+
+    # Flip se e' nero a muovere: il value head predice sempre
+    # dal punto di vista del giocatore che muove
+    return val_white if turn == chess.WHITE else -val_white
+
+
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+
+class StockfishDataset(Dataset):
     def __init__(self, df: pd.DataFrame):
         self.df = df.reset_index(drop=True)
 
@@ -76,21 +116,27 @@ class LichessDataset(Dataset):
 
     def __getitem__(self, idx):
         row      = self.df.iloc[idx]
-        fen      = row["fen"]
-        move_uci = row["move_uci"]
-        outcome  = float(row["outcome"])
+        fen      = str(row["FEN"])
+        eval_str = str(row["Evaluation"])
+        move_uci = str(row["Move"])
 
         board      = chess.Board(fen)
         legal_list = list(board.legal_moves)
 
-        board_t = encode_board(fen)
+        board_t = encode_board_fast(fen)
         moves_t = encode_legal_moves(board)
 
+        # Value target: centipawn → win probability (player-to-move perspective)
+        value = eval_to_winprob(eval_str, board.turn)
+
+        # Policy target: one-hot sulla mossa migliore Stockfish
         target_vec = torch.zeros(len(legal_list))
         try:
-            played = chess.Move.from_uci(move_uci)
-            idx_m  = legal_list.index(played) if played in legal_list else 0
-            target_vec[idx_m] = 1.0
+            best = chess.Move.from_uci(move_uci)
+            if best in legal_list:
+                target_vec[legal_list.index(best)] = 1.0
+            else:
+                target_vec[0] = 1.0
         except Exception:
             target_vec[0] = 1.0
 
@@ -98,7 +144,7 @@ class LichessDataset(Dataset):
             "board_t":  board_t,
             "moves_t":  moves_t,
             "policy_t": target_vec,
-            "value_t":  torch.tensor([outcome], dtype=torch.float32),
+            "value_t":  torch.tensor([value], dtype=torch.float32),
             "n_moves":  len(legal_list),
             "fen":      fen,
         }
@@ -132,37 +178,42 @@ def collate_fn(batch):
 
 
 # ---------------------------------------------------------------------------
-# Generazione board figli — lazy, solo per il subsample Bellman
+# Generazione board figli (lazy)
 # ---------------------------------------------------------------------------
 
 def build_children_batch(fens: list, device: torch.device):
-    """
-    Genera board figli solo per le BELLMAN_SUBSAMPLE posizioni selezionate.
-    Non chiamata durante il warmup — nessun overhead nelle prime epoche.
-    """
-    all_children, all_n = [], []
+    all_children = []
+    all_n = []
     max_n = 0
 
     for fen in fens:
-        board      = chess.Board(fen)
-        legal_list = list(board.legal_moves)
-        children   = []
-        for move in legal_list:
-            board.push(move)
-            children.append(encode_board(board.fen()))
-            board.pop()
-        all_children.append(children)
-        all_n.append(len(children))
-        max_n = max(max_n, len(children))
+        board = chess.Board(fen)
 
-    B_sub           = len(fens)
-    children_padded = torch.zeros(B_sub, max_n, 13, 8, 8)
-    child_mask      = torch.zeros(B_sub, max_n, dtype=torch.bool)
+        child_fens = []
+
+        for move in board.legal_moves:
+            board.push(move)
+            child_fens.append(board.fen())
+            board.pop()
+
+        if len(child_fens) > 0:
+            children = encode_board_batch(child_fens)
+        else:
+            children = torch.empty((0, 13, 8, 8), dtype=torch.float32)
+
+        all_children.append(children)
+        all_n.append(len(child_fens))
+        max_n = max(max_n, len(child_fens))
+
+    B = len(fens)
+
+    children_padded = torch.zeros(B, max_n, 13, 8, 8)
+    child_mask = torch.zeros(B, max_n, dtype=torch.bool)
 
     for i, (children, n) in enumerate(zip(all_children, all_n)):
         if n > 0:
-            children_padded[i, :n] = torch.stack(children)
-            child_mask[i, :n]      = True
+            children_padded[i, :n] = children
+            child_mask[i, :n] = True
 
     return children_padded.to(device), child_mask.to(device)
 
@@ -175,9 +226,7 @@ def bellman_consistency_loss(model, children_padded, child_mask, value_parent, t
     """
     L = mean( V(s) + softmin_tau V(s') )^2
 
-    softmin_tau(X) = -tau * logsumexp(-X / tau)
-
-    Niente detach su value_parent: gradiente fluisce in entrambe le direzioni.
+    Usa log-mean-exp (non log-sum-exp) per evitare il bias tau*log(n).
     """
     B_sub, max_n, C, H, W = children_padded.shape
 
@@ -185,9 +234,12 @@ def bellman_consistency_loss(model, children_padded, child_mask, value_parent, t
     h_children    = model.backbone(children_flat)
     v_children    = model.value_head(h_children).view(B_sub, max_n)
 
+    n_real   = child_mask.sum(dim=1).float().clamp(min=1.0)
     INF      = torch.finfo(v_children.dtype).max / 2
     v_masked = v_children.masked_fill(~child_mask, INF)
-    soft_min = -tau * torch.logsumexp(-v_masked / tau, dim=1)
+
+    soft_min = -tau * torch.logsumexp(-v_masked / tau, dim=1) \
+               + tau * torch.log(n_real)
 
     residual = value_parent.squeeze(1) + soft_min
     return (residual ** 2).mean()
@@ -198,8 +250,8 @@ def bellman_consistency_loss(model, children_padded, child_mask, value_parent, t
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def compute_value_std(value_pred: torch.Tensor) -> float:
-    return value_pred.squeeze().float().std().item()
+def compute_value_std(v: torch.Tensor) -> float:
+    return v.squeeze().float().std().item()
 
 
 def bellman_tau(epoch: int) -> float:
@@ -250,21 +302,13 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None):
 # ---------------------------------------------------------------------------
 
 def run_epoch(model, loader, optimizer, device,
-              train=True, freeze_backbone=False,
-              use_bellman=False, tau=TAU_START):
+              train=True, use_bellman=False, tau=TAU_START):
 
     model.train() if train else model.eval()
-
-    if freeze_backbone:
-        for p in model.backbone.parameters():     p.requires_grad = False
-        for p in model.move_encoder.parameters(): p.requires_grad = False
-    else:
-        for p in model.parameters(): p.requires_grad = True
+    for p in model.parameters(): p.requires_grad = train
 
     total_p, total_v, total_b, total_acc = 0.0, 0.0, 0.0, 0.0
-    vstd_list       = []
-    bellman_skipped = 0
-    n_batches       = 0
+    vstd_list, n_batches, bellman_skipped = [], 0, 0
 
     ctx = torch.no_grad() if not train else torch.enable_grad()
 
@@ -285,8 +329,6 @@ def run_epoch(model, loader, optimizer, device,
             loss        = policy_loss + VALUE_LOSS_WEIGHT * value_loss
 
             b_loss_val = torch.tensor(0.0, device=device)
-
-            # Bellman: solo in training, solo dopo warmup
             if train and use_bellman:
                 vstd = compute_value_std(value_pred)
                 if vstd < VALUE_COLLAPSE_THRESH:
@@ -340,17 +382,28 @@ def run_epoch(model, loader, optimizer, device,
 
 def main():
     print(f"Device: {DEVICE}")
-    print(f"Fase 1 (no Bellman, veloce): epoche 1-{WARMUP_EPOCHS}")
-    print(f"Fase 2 (Bellman lambda={BELLMAN_WEIGHT}): epoche {WARMUP_EPOCHS+1}-{TOTAL_EPOCHS}")
-    print(f"tau: {TAU_START} -> {TAU_FINAL}   AdamW weight_decay={WEIGHT_DECAY}\n")
+    print(f"Dataset: {STOCKFISH_CSV}")
+    print(f"Warmup (no Bellman): epoche 1-{WARMUP_EPOCHS}")
+    print(f"Bellman (lambda={BELLMAN_WEIGHT}): epoche {WARMUP_EPOCHS+1}-{TOTAL_EPOCHS}")
+    print(f"tau: {TAU_START} -> {TAU_FINAL}\n")
 
-    df = pd.read_csv(FILTERED_CSV)
+    df = pd.read_csv(STOCKFISH_CSV)
     print(f"Posizioni raw: {len(df):,}")
+
+    # Pulizia: rimuovi righe con valori mancanti
+    df = df.dropna(subset=["FEN", "Evaluation", "Move"])
+    df = df[df["Evaluation"].astype(str).str.strip() != ""]
+    print(f"Posizioni dopo pulizia: {len(df):,}")
+
     if MAX_SAMPLES and len(df) > MAX_SAMPLES:
         df = df.sample(n=MAX_SAMPLES, random_state=42)
-    df = df.dropna(subset=["fen", "move_uci", "outcome"])
-    df = df[df["outcome"].isin([1.0, 0.0, -1.0])]
-    print(f"Posizioni dopo pulizia: {len(df):,}")
+        print(f"Campionamento a {MAX_SAMPLES:,}")
+
+    # Distribuzione eval (quante mate, quante cp)
+    evals = df["Evaluation"].astype(str)
+    n_mate = evals.str.startswith('#').sum()
+    print(f"Mate positions: {n_mate:,} ({100*n_mate/len(df):.1f}%)")
+    print(f"CP positions:   {len(df)-n_mate:,}\n")
 
     val_size = max(1000, int(len(df) * VAL_FRACTION))
     val_df   = df.sample(n=val_size, random_state=42)
@@ -358,11 +411,11 @@ def main():
     print(f"Train: {len(train_df):,}  |  Val: {len(val_df):,}\n")
 
     train_loader = DataLoader(
-        LichessDataset(train_df), batch_size=BATCH_SIZE, shuffle=True,
+        StockfishDataset(train_df), batch_size=BATCH_SIZE, shuffle=True,
         collate_fn=collate_fn, num_workers=NUM_WORKERS, pin_memory=True,
     )
     val_loader = DataLoader(
-        LichessDataset(val_df), batch_size=BATCH_SIZE, shuffle=False,
+        StockfishDataset(val_df), batch_size=BATCH_SIZE, shuffle=False,
         collate_fn=collate_fn, num_workers=NUM_WORKERS, pin_memory=True,
     )
 
@@ -378,15 +431,11 @@ def main():
     else:
         print("Nessun checkpoint — parto da zero.")
 
-    optimizer = AdamW([
-        {"params": list(model.backbone.parameters()) +
-                   list(model.move_encoder.parameters()),
-         "lr": LR_BACKBONE, "weight_decay": WEIGHT_DECAY},
-        {"params": list(model.policy_head.parameters()) +
-                   list(model.value_head.parameters()),
-         "lr": LR_HEADS, "weight_decay": WEIGHT_DECAY},
-    ])
-
+    optimizer = AdamW(
+        model.parameters(),
+        lr=LR,
+        weight_decay=WEIGHT_DECAY,
+    )
     scheduler     = CosineAnnealingLR(optimizer, T_max=TOTAL_EPOCHS, eta_min=1e-6)
     best_val_loss = float("inf")
     start_epoch   = 1
@@ -400,20 +449,14 @@ def main():
     print(f"Parametri: {sum(p.numel() for p in model.parameters()):,}\n")
 
     for epoch in range(start_epoch, TOTAL_EPOCHS + 1):
-        freeze      = epoch <= FREEZE_EPOCHS
         use_bellman = epoch > WARMUP_EPOCHS
         tau         = bellman_tau(epoch)
         phase       = "warmup          " if not use_bellman else f"bellman tau={tau:.2f}"
 
-        train_s = run_epoch(
-            model, train_loader, optimizer, DEVICE,
-            train=True, freeze_backbone=freeze,
-            use_bellman=use_bellman, tau=tau,
-        )
-        val_s = run_epoch(
-            model, val_loader, optimizer, DEVICE,
-            train=False, use_bellman=False,
-        )
+        train_s = run_epoch(model, train_loader, optimizer, DEVICE,
+                            train=True, use_bellman=use_bellman, tau=tau)
+        val_s   = run_epoch(model, val_loader, optimizer, DEVICE,
+                            train=False, use_bellman=False)
 
         scheduler.step()
 
@@ -432,8 +475,7 @@ def main():
 
         gap = val_s["policy_loss"] - train_s["policy_loss"]
         if gap > 0.8:
-            print(f"  ATTENZIONE overfitting: gap train/val = {gap:.3f} "
-                  f"— considera piu dati o weight_decay piu alto")
+            print(f"  ATTENZIONE overfitting: gap train/val = {gap:.3f}")
 
         save_checkpoint(model, optimizer, scheduler, epoch,
                         val_s["policy_loss"], CHECKPOINT_OUT)
@@ -441,7 +483,7 @@ def main():
             best_val_loss = val_s["policy_loss"]
             save_checkpoint(model, optimizer, scheduler, epoch,
                             best_val_loss, os.path.join(CHECKPOINT_DIR, "best.pt"))
-            print(f"  * Nuovo best val policy_loss: {best_val_loss:.4f}")
+            print(f"  * Nuovo best: {best_val_loss:.4f}")
 
     print(f"\nCompletato. Best val policy_loss: {best_val_loss:.4f}")
 

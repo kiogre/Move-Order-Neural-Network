@@ -49,11 +49,11 @@ CHECKPOINT_OUT   = os.path.join(CHECKPOINT_DIR, "last.pt")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Training
-TOTAL_EPOCHS      = 30
+TOTAL_EPOCHS      = 60
 FREEZE_EPOCHS     = 0        # nessun freeze — pesi random, tutto da imparare
 BATCH_SIZE        = 256
-LR_MAIN           = 1e-3     # encoder, move_encoder, heads
-LR_BIAS_SCALE     = 1e-4     # bias cinematico (uno per testa per layer)
+LR_MAIN           = 3e-4     # encoder, move_encoder, heads
+LR_BIAS_SCALE     = 3e-5     # bias cinematico (uno per testa per layer)
 VALUE_LOSS_WEIGHT = 2.0
 
 # Dataset

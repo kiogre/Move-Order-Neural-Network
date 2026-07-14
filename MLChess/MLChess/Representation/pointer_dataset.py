@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import pandas as pd
 from torch.nn.utils.rnn import pad_sequence
+import math
 
 
 # ---------------------------------------------------------------------------
@@ -13,6 +14,12 @@ PIECE_TO_PLANE = {
     'P': 0, 'N': 1, 'B': 2, 'R': 3, 'Q': 4, 'K': 5,
     'p': 6, 'n': 7, 'b': 8, 'r': 9, 'q': 10, 'k': 11,
 }
+
+_PIECE_IDX = {
+    'P': 0, 'N': 1, 'B': 2, 'R': 3, 'Q': 4, 'K': 5,
+    'p': 0, 'n': 1, 'b': 2, 'r': 3, 'q': 4, 'k': 5,
+}
+
 
 # Indici per i pezzi nel move vector (one-hot, 6 valori)
 PIECE_TYPE_TO_IDX = {
@@ -134,15 +141,14 @@ def encode_legal_moves(board: chess.Board) -> torch.Tensor:
     return torch.stack(encoded, dim=0)  # (N, 46)
 
 
-def encode_result(result: str, max_cp: int = 1000) -> float:
-    """
-    Normalizza la valutazione della posizione in [-1, 1].
-    Matto positivo → 1.0, matto negativo → -1.0.
-    Centipawn clampati a ±max_cp poi divisi per max_cp.
-    """
-    if '#' in result:
-        return 1.0 if '+' in result else -1.0
-    return max(-max_cp, min(max_cp, int(result))) / max_cp
+def encode_result(result_str: str) -> float:
+    s = result_str.strip()
+    if s.startswith('#'):
+        return 1.0 if s.startswith('#+') else -1.0
+    try:    cp = float(s)
+    except: cp = 0.0
+    cp = max(-2000.0, min(2000.0, cp))
+    return math.tanh(cp / 400)
 
 
 # ---------------------------------------------------------------------------
@@ -169,15 +175,17 @@ class PointerChessDataset(torch.utils.data.Dataset):
         df = pd.read_csv(csv_file)
 
         total_len = len(df)
-        train_end = int(total_len * 0.70)
-        val_end   = int(total_len * 0.85)
+        train_end = int(total_len * 0.02)
+        #train_end = int(total_len * 0.70)
+        # val_end   = int(total_len * 0.85)
 
         if split == 'train':
             df = df.iloc[:train_end]
         elif split == 'validation':
-            df = df.iloc[train_end:val_end]
-        elif split == 'test':
-            df = df.iloc[val_end:]
+            # df = df.iloc[train_end:val_end]
+            df = df.iloc[train_end:]
+        # elif split == 'test':
+        #     df = df.iloc[val_end:]
         else:
             raise ValueError("split deve essere 'train', 'validation', o 'test'")
 
@@ -195,7 +203,7 @@ class PointerChessDataset(torch.utils.data.Dataset):
         board = chess.Board(fen)
 
         # Encoding della board
-        board_tensor = encode_board(fen)
+        board_tensor = encode_board_fast(fen)
 
         # Lista mosse legali e loro encoding
         legal_moves_list = list(board.legal_moves)
@@ -278,7 +286,7 @@ def create_dataloaders_pointer(
     """
     trainset      = PointerChessDataset(csv_file, split='train')
     validationset = PointerChessDataset(csv_file, split='validation')
-    testset       = PointerChessDataset(csv_file, split='test')
+    # testset       = PointerChessDataset(csv_file, split='test')
 
     g = torch.Generator()
 
@@ -295,12 +303,80 @@ def create_dataloaders_pointer(
     validationloader = torch.utils.data.DataLoader(
         validationset, batch_size=batch_size, shuffle=False, **common
     )
-    testloader = torch.utils.data.DataLoader(
-        testset, batch_size=batch_size, shuffle=False, **common
-    )
+    # testloader = torch.utils.data.DataLoader(
+    #     testset, batch_size=batch_size, shuffle=False, **common
+    # )
 
     print(f"Train set size:      {len(trainset)}")
     print(f"Validation set size: {len(validationset)}")
-    print(f"Test set size:       {len(testset)}")
+    # print(f"Test set size:       {len(testset)}")
 
-    return trainloader, validationloader, testloader
+    return trainloader, validationloader#, testloader
+
+def encode_board_fast(fen: str) -> torch.Tensor:
+    """
+    Encoda un singolo FEN (o FEN troncato) in un tensore (13, 8, 8).
+    Equivalente a encode_board di MLChess ma senza chess.Board.
+    """
+    parts = fen.split(' ')
+    placement = parts[0]
+    flip = (parts[1] == 'b') if len(parts) > 1 else False
+
+    out = np.zeros((13, 8, 8), dtype=np.float32)
+    out[12, :, :] = 1.0
+
+    for fen_rank_idx, rank_str in enumerate(placement.split('/')):
+        # fen_rank_idx 0 = rank 8 (chess rank 7, indice 7)
+        # chess_rank = 7 - fen_rank_idx
+        # se flip: display_rank = fen_rank_idx
+        # se non flip: display_rank = 7 - fen_rank_idx
+        display_rank = fen_rank_idx if flip else (7 - fen_rank_idx)
+
+        file_idx = 0
+        for ch in rank_str:
+            if ch.isdigit():
+                file_idx += int(ch)
+            else:
+                piece_idx  = _PIECE_IDX[ch]
+                is_white   = ch.isupper()
+                is_current = is_white != flip   # pezzo del giocatore che muove
+                plane      = piece_idx if is_current else (piece_idx + 6)
+                out[plane, display_rank, file_idx] = 1.0
+                file_idx += 1
+
+    return torch.from_numpy(out)
+
+
+def encode_board_batch(fens) -> torch.Tensor:
+    """
+    Encoda N FEN in un colpo solo.
+    Input:  lista/array di N stringhe FEN (o FEN troncati)
+    Output: (N, 13, 8, 8) float32
+
+    Circa 3-5x più veloce di chiamare encode_board_fast N volte
+    grazie al pre-alloco del buffer numpy e al loop interno ottimizzato.
+    """
+    N = len(fens)
+    out = np.zeros((N, 13, 8, 8), dtype=np.float32)
+    out[:, 12, :, :] = 1.0
+
+    for i, fen in enumerate(fens):
+        parts     = fen.split(' ')
+        placement = parts[0]
+        flip      = (parts[1] == 'b')
+
+        for fen_rank_idx, rank_str in enumerate(placement.split('/')):
+            display_rank = fen_rank_idx if flip else (7 - fen_rank_idx)
+            file_idx = 0
+            for ch in rank_str:
+                if ch.isdigit():
+                    file_idx += int(ch)
+                else:
+                    piece_idx  = _PIECE_IDX[ch]
+                    is_white   = ch.isupper()
+                    is_current = is_white != flip
+                    plane      = piece_idx if is_current else (piece_idx + 6)
+                    out[i, plane, display_rank, file_idx] = 1.0
+                    file_idx += 1
+
+    return torch.from_numpy(out)
