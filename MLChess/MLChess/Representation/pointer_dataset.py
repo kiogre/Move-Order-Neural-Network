@@ -175,7 +175,7 @@ class PointerChessDataset(torch.utils.data.Dataset):
         df = pd.read_csv(csv_file)
 
         total_len = len(df)
-        train_end = int(total_len * 0.02)
+        train_end = int(total_len * 0.98)
         #train_end = int(total_len * 0.70)
         # val_end   = int(total_len * 0.85)
 
