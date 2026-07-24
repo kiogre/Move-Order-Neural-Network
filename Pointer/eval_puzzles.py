@@ -29,12 +29,13 @@ Eseguito direttamente, fa una valutazione standalone su un checkpoint.
 """
 
 import random
+import time
 import chess
 import torch
 import pandas as pd
 from typing import Optional
 
-from MLChess import encode_board, encode_legal_moves, JellyFishPointer, BatchedPointerMCTS
+from MLChess import encode_board, encode_legal_moves, JellyFishPointer, BatchedPointerMCTS, PointerMCTS
 from puzzle_split import is_probe_puzzle
 
 MOVE_VECTOR_DIM = 46
@@ -166,8 +167,19 @@ class PuzzleEvaluator:
     # ------------------------------------------------------------------
 
     @torch.no_grad()
-    def evaluate_mcts(self, mcts: BatchedPointerMCTS, n_samples: int = 50,
+    def evaluate_mcts(self, mcts, n_samples: int = 50,
                        num_simulations: int = 50, seed: int = 999) -> dict:
+        """
+        Solve rate con MCTS. Accetta sia BatchedPointerMCTS (offline/self-play)
+        che PointerMCTS (single-game, la stessa classe usata in partita online)
+        — entrambe espongono get_best_move(board, num_simulations, temperature).
+
+        Per PointerMCTS chiamiamo reset_root() prima di ogni puzzle: ogni
+        posizione e' indipendente dalla precedente, quindi il tree reuse tra
+        un puzzle e l'altro non ha senso (e senza reset esplicito il confronto
+        di FEN in _get_or_build_root fallirebbe comunque quasi sempre, ma e'
+        piu' pulito e corretto forzarlo).
+        """
         if len(self.positions) == 0:
             return {"n": 0, "mcts_solve_rate": None}
 
@@ -176,19 +188,28 @@ class PuzzleEvaluator:
                  else rng.sample(self.positions, n_samples)
 
         n_correct = 0
+        total_time = 0.0
         for fen, target_uci in sample:
             board = chess.Board(fen)
-            move  = mcts.get_best_move(board, num_simulations=num_simulations, temperature=0.0)
+            if hasattr(mcts, "reset_root"):
+                mcts.reset_root()
+            t0   = time.perf_counter()
+            move = mcts.get_best_move(board, num_simulations=num_simulations, temperature=0.0)
+            total_time += time.perf_counter() - t0
             if move.uci() == target_uci:
                 n_correct += 1
 
-        return {"n": len(sample), "mcts_solve_rate": n_correct / len(sample)}
+        return {
+            "n":                len(sample),
+            "mcts_solve_rate":  n_correct / len(sample),
+            "avg_time_s":       total_time / len(sample),
+        }
 
     # ------------------------------------------------------------------
     # Comodo: tutto insieme
     # ------------------------------------------------------------------
 
-    def evaluate(self, model: JellyFishPointer, mcts: Optional[BatchedPointerMCTS] = None,
+    def evaluate(self, model: JellyFishPointer, mcts: Optional[object] = None,
                   mcts_n_samples: int = 50, mcts_num_simulations: int = 50) -> dict:
         stats = self.evaluate_policy_value(model)
         if mcts is not None:
@@ -213,6 +234,16 @@ if __name__ == "__main__":
     parser.add_argument("--themes",     type=str, default="mateIn1|mateIn2|mateIn3")
     parser.add_argument("--mcts_samples", type=int, default=50)
     parser.add_argument("--mcts_sims",    type=int, default=50)
+    parser.add_argument("--mcts_type",    type=str, default="batched",
+                         choices=["batched", "single"],
+                         help="'single' = PointerMCTS, la stessa classe usata "
+                              "in partita online. 'batched' = BatchedPointerMCTS, "
+                              "quella usata per self-play/generazione dati offline.")
+    parser.add_argument("--c_puct",       type=float, default=2.5)
+    parser.add_argument("--mcts_batch_size", type=int, default=64,
+                         help="batch_size interno di PointerMCTS (numero di "
+                              "foglie selezionate per round prima del backprop). "
+                              "Non pertinente per --mcts_type batched.")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -225,7 +256,14 @@ if __name__ == "__main__":
     model.load_state_dict(state_dict)
     model.eval()
 
-    mcts = BatchedPointerMCTS(model, device, c_puct=2.5)
+    if args.mcts_type == "single":
+        mcts = PointerMCTS(model, device, c_puct=args.c_puct,
+                            batch_size=args.mcts_batch_size)
+        print(f"  [eval_puzzles] Uso PointerMCTS (single-game, online) "
+              f"c_puct={args.c_puct} batch_size={args.mcts_batch_size}")
+    else:
+        mcts = BatchedPointerMCTS(model, device, c_puct=args.c_puct)
+        print(f"  [eval_puzzles] Uso BatchedPointerMCTS (offline) c_puct={args.c_puct}")
 
     evaluator = PuzzleEvaluator(args.puzzles, device, n_samples=args.n_samples, themes_regex=args.themes)
     stats = evaluator.evaluate(model, mcts, mcts_n_samples=args.mcts_samples,

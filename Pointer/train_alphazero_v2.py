@@ -1,31 +1,42 @@
 """
-train_v2.py — Training supervisionato con Bellman consistency, due fasi, diagnostica.
+train_alphazero_v2.py — Training AlphaZero-style per JellyFishPointer (BatchedPointerMCTS).
 
-Cambiamenti rispetto alla versione precedente:
-  - AdamW + weight_decay contro overfitting
-  - Fase 1 (WARMUP_EPOCHS): solo value + policy, no Bellman — identico al
-    training veloce originale, nessun overhead
-  - Fase 2: Bellman con tau che parte alto (2.0) e scende a TAU_FINAL
-  - Niente detach su value_parent: gradiente fluisce in entrambe le direzioni
-  - Bellman saltato automaticamente se value_std < soglia (collasso)
-  - Avviso se gap train/val > 0.8 (overfitting)
+Pipeline per ogni epoca:
+  1. Self-play batched con MCTS: genera N partite in parallelo
+  2. Accumula nel replay buffer: (board, policy_target, value_target)
+  3. Training supervisionato sui target MCTS + campioni curriculum
 
-Utilizzo:
-  python train_v2.py
+Differenze rispetto a train_alphazero.py (v1 sequenziale):
+  - BatchedPointerMCTS: tutte le partite in parallelo, una forward pass per step
+  - Frozen greedy gestito internamente da play_games_batched
+  - Curriculum learning: 30% delle partite partono da posizioni tattiche
+  - Mixed buffer: 20% del batch da dataset tattico (solo policy loss)
+  - Value loss weight: 3.0 per ricalibrazione del value head
+  - Checkpoint atomico con os.replace()
+  - best_winrate letto da best.pt separatamente
 """
 
+###################################################################
+# REMEMBER CHANGE BACK POINTER-MCTS BATCHED THE VALUE OF THE DRAW #
+###################################################################
+
 import os
-import pandas as pd
+import copy
+import math
+import random
+import pickle
+import chess
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from torch.optim import AdamW
-from torch.optim.lr_scheduler import CosineAnnealingLR
+import pandas as pd
+import numpy as np
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from collections import deque
 from tqdm import tqdm
-import chess
 
-from MLChess import encode_board, encode_legal_moves, JellyFishPointer
+from MLChess import encode_board, encode_legal_moves, JellyFishPointer, BatchedPointerMCTS
 
 MOVE_VECTOR_DIM = 46
 
@@ -33,305 +44,356 @@ MOVE_VECTOR_DIM = 46
 # Configurazione
 # ---------------------------------------------------------------------------
 
-FILTERED_CSV   = "filtered_games.csv"
-CHECKPOINT_IN  = "checkpoints_az_v2/last.pt"
-CHECKPOINT_DIR = "checkpoints_v2"
-CHECKPOINT_OUT = os.path.join(CHECKPOINT_DIR, "last.pt")
+SUPERVISED_CHECKPOINT = "checkpoints_pointer_20_from_fast/best.pt"
+AZ_CHECKPOINT_DIR     = "checkpoints_az_v2"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+EPOCHS          = 500
+GAMES_PER_EPOCH = 64
+MAX_MOVES       = 400
+
+# MCTS
+NUM_SIMULATIONS = 150
+TEMP_HIGH       = 1.0
+TEMP_LOW        = 0.01
+TEMP_THRESHOLD  = 10
+
+# Replay buffer
+BUFFER_SIZE = 200_000
+MIN_BUFFER  = 1_000
+
 # Training
-TOTAL_EPOCHS      = 30
-FREEZE_EPOCHS     = 0
-BATCH_SIZE        = 256
-LR_BACKBONE       = 5e-4
-LR_HEADS          = 5e-4
-WEIGHT_DECAY      = 1e-4
-VALUE_LOSS_WEIGHT = 2.0
-GRAD_CLIP         = 1.0
+TRAIN_STEPS      = 200
+BATCH_SIZE       = 256
+LR_BACKBONE      = 5e-5
+LR_HEADS         = 5e-5
+VALUE_LOSS_WEIGHT = 3.0   # peso value loss per ricalibrazione scala predizioni
 
-# Bellman
-WARMUP_EPOCHS         = 5     # epoche senza Bellman — veloci come il training originale
-BELLMAN_WEIGHT        = 0.05  # lambda piccolo — termine ausiliario
-TAU_START             = 2.0   # temperatura alta inizialmente (piu smooth)
-TAU_FINAL             = 0.5   # temperatura finale
-BELLMAN_SUBSAMPLE     = 64    # posizioni per batch per Bellman
-VALUE_COLLAPSE_THRESH = 0.05  # sotto questa soglia: salta Bellman + avviso
+# Frozen opponent
+EVAL_GAMES        = 100
+WINRATE_THRESHOLD = 0.55
 
-# Dataset
-MAX_SAMPLES  = 2_000_000
-VAL_FRACTION = 0.02
-NUM_WORKERS  = 4
+# Curriculum learning
+CURRICULUM_CSV       = "advantages_training_dataset.csv" #"../over_mate_1_tactic_evals.csv"
+CURRICULUM_PROB      = 0.30
+CURRICULUM_MAX_MOVES = 120
 
-# ---------------------------------------------------------------------------
-# Dataset — FEN incluso, nessuna generazione di figli qui
-# ---------------------------------------------------------------------------
-
-class LichessDataset(Dataset):
-    def __init__(self, df: pd.DataFrame):
-        self.df = df.reset_index(drop=True)
-
-    def __len__(self):
-        return len(self.df)
-
-    def __getitem__(self, idx):
-        row      = self.df.iloc[idx]
-        fen      = row["fen"]
-        move_uci = row["move_uci"]
-        outcome  = float(row["outcome"])
-
-        board      = chess.Board(fen)
-        legal_list = list(board.legal_moves)
-
-        board_t = encode_board(fen)
-        moves_t = encode_legal_moves(board)
-
-        target_vec = torch.zeros(len(legal_list))
-        try:
-            played = chess.Move.from_uci(move_uci)
-            idx_m  = legal_list.index(played) if played in legal_list else 0
-            target_vec[idx_m] = 1.0
-        except Exception:
-            target_vec[0] = 1.0
-
-        return {
-            "board_t":  board_t,
-            "moves_t":  moves_t,
-            "policy_t": target_vec,
-            "value_t":  torch.tensor([outcome], dtype=torch.float32),
-            "n_moves":  len(legal_list),
-            "fen":      fen,
-        }
-
-
-def collate_fn(batch):
-    max_n = max(item["n_moves"] for item in batch)
-    B     = len(batch)
-
-    boards_t      = torch.stack([item["board_t"] for item in batch])
-    moves_padded  = torch.zeros(B, max_n, MOVE_VECTOR_DIM)
-    move_mask     = torch.zeros(B, max_n, dtype=torch.bool)
-    policy_padded = torch.zeros(B, max_n)
-    values_t      = torch.stack([item["value_t"] for item in batch])
-    fens          = [item["fen"] for item in batch]
-
-    for i, item in enumerate(batch):
-        n = item["n_moves"]
-        moves_padded[i, :n]  = item["moves_t"]
-        move_mask[i, :n]     = True
-        policy_padded[i, :n] = item["policy_t"]
-
-    return {
-        "boards_t":     boards_t,
-        "moves_padded": moves_padded,
-        "move_mask":    move_mask,
-        "policy_padded":policy_padded,
-        "values_t":     values_t,
-        "fens":         fens,
-    }
+# Mixed buffer — campioni diretti dal dataset tattico
+MIXED_BUFFER_RATIO = 0.0
+MIXED_BUFFER_SIZE  = 50_000
 
 
 # ---------------------------------------------------------------------------
-# Generazione board figli — lazy, solo per il subsample Bellman
+# Optimizer
 # ---------------------------------------------------------------------------
 
-def build_children_batch(fens: list, device: torch.device):
+def build_optimizer(model: JellyFishPointer) -> Adam:
+    return Adam([
+        {"params": list(model.backbone.parameters()) +
+                   list(model.move_encoder.parameters()),
+         "lr": LR_BACKBONE, "name": "backbone"},
+        {"params": list(model.policy_head.parameters()) +
+                   list(model.value_head.parameters()),
+         "lr": LR_HEADS, "name": "heads"},
+    ])
+
+
+# ---------------------------------------------------------------------------
+# Curriculum dataset
+# ---------------------------------------------------------------------------
+
+def encode_value(evaluation: str, max_cp: int = 1000) -> float:
+    if '#' in str(evaluation):
+        return 1.0 if '+' in str(evaluation) or not str(evaluation).startswith('-') else -1.0
+    try:
+        cp = max(-max_cp, min(max_cp, int(evaluation)))
+        return cp / max_cp
+    except (ValueError, TypeError):
+        return 0.0
+
+
+class CurriculumDataset:
     """
-    Genera board figli solo per le BELLMAN_SUBSAMPLE posizioni selezionate.
-    Non chiamata durante il warmup — nessun overhead nelle prime epoche.
+    Carica posizioni dal dataset tattico per:
+    1. Fornire FEN di partenza per le partite curriculum
+    2. Fornire campioni diretti per il replay buffer misto (solo policy loss)
     """
-    all_children, all_n = [], []
-    max_n = 0
+    def __init__(self, csv_file: str, max_samples: int = MIXED_BUFFER_SIZE):
+        tqdm.write(f"  Caricamento curriculum dataset da {csv_file}...")
+        df = pd.read_csv(csv_file).dropna(subset=["FEN", "Evaluation", "Move"])
+        if len(df) > max_samples * 4:
+            df = df.sample(n=max_samples * 4, random_state=42)
+        self.df       = df.reset_index(drop=True)
+        self.max_size = max_samples
+        tqdm.write(f"  Curriculum dataset: {len(self.df)} posizioni")
 
-    for fen in fens:
-        board      = chess.Board(fen)
-        legal_list = list(board.legal_moves)
-        children   = []
-        for move in legal_list:
-            board.push(move)
-            children.append(encode_board(board.fen()))
-            board.pop()
-        all_children.append(children)
-        all_n.append(len(children))
-        max_n = max(max_n, len(children))
+    def get_random_fen(self) -> str:
+        return self.df.iloc[random.randint(0, len(self.df) - 1)]["FEN"]
 
-    B_sub           = len(fens)
-    children_padded = torch.zeros(B_sub, max_n, 13, 8, 8)
-    child_mask      = torch.zeros(B_sub, max_n, dtype=torch.bool)
+    def get_mixed_samples(self, n: int) -> list[dict]:
+        """
+        Restituisce n campioni dal dataset.
+        Policy target: one-hot sulla mossa Stockfish.
+        Value target: None — escluso dalla value loss (centipawn non calibrati).
+        """
+        indices = random.sample(range(len(self.df)), min(n, len(self.df)))
+        samples = []
+        for idx in indices:
+            row = self.df.iloc[idx]
+            try:
+                board      = chess.Board(row["FEN"])
+                legal_list = list(board.legal_moves)
+                if not legal_list:
+                    continue
 
-    for i, (children, n) in enumerate(zip(all_children, all_n)):
-        if n > 0:
-            children_padded[i, :n] = torch.stack(children)
-            child_mask[i, :n]      = True
+                target_move   = chess.Move.from_uci(str(row["Move"]))
+                legal_moves_t = encode_legal_moves(board)
 
-    return children_padded.to(device), child_mask.to(device)
+                target_vec = torch.zeros(len(legal_list))
+                if target_move in legal_list:
+                    target_vec[legal_list.index(target_move)] = 1.0
+                else:
+                    target_vec[0] = 1.0
 
+                samples.append({
+                    "board_fen":     row["FEN"],
+                    "legal_moves":   legal_moves_t,
+                    "policy_target": target_vec,
+                    "value_target":  None,   # mascherato nella value loss
+                })
+            except Exception:
+                continue
+        return samples
+
+class CurriculumDataset2:
+    """
+    Carica posizioni da puzzle Lichess filtrati per tema.
+    Usa solo get_random_fen() per le starting positions del self-play.
+    
+    Formato CSV Lichess puzzles:
+        PuzzleId, FEN, Moves, Rating, Themes, ...
+    
+    Il FEN è la posizione PRIMA della mossa dell'avversario.
+    Applica la prima mossa per ottenere la posizione reale del puzzle.
+    """
+    def __init__(self, csv_file: str, max_samples: int = MIXED_BUFFER_SIZE):
+        tqdm.write(f"  Caricamento curriculum dataset da {csv_file}...")
+        df = pd.read_csv(csv_file)
+
+        # Filtra per temi utili — posizioni con esito chiaro
+        mask = (
+            df['Themes'].str.contains('advantage|crushing|endgame', na=False) &
+            ~df['Themes'].str.contains('mateIn1', na=False)
+        )
+        df = df[mask].dropna(subset=["FEN", "Moves"])
+
+        if len(df) > max_samples * 4:
+            df = df.sample(n=max_samples * 4, random_state=42)
+
+        # Pre-calcola i FEN reali applicando la prima mossa (mossa avversario)
+        fens = []
+        for _, row in df.iterrows():
+            try:
+                board = chess.Board(row["FEN"])
+                first_move = chess.Move.from_uci(row["Moves"].split()[0])
+                board.push(first_move)
+                fens.append(board.fen())
+            except Exception:
+                continue
+
+        self.fens     = fens
+        self.max_size = max_samples
+        tqdm.write(f"  Curriculum dataset: {len(self.fens)} posizioni")
+
+    def get_random_fen(self) -> str:
+        return self.fens[random.randint(0, len(self.fens) - 1)]
+
+    def get_mixed_samples(self, n: int) -> list[dict]:
+        # Non usato con MIXED_BUFFER_RATIO = 0.0
+        return []
 
 # ---------------------------------------------------------------------------
-# Bellman consistency loss
-# ---------------------------------------------------------------------------
-
-def bellman_consistency_loss(model, children_padded, child_mask, value_parent, tau):
-    """
-    L = mean( V(s) + softmin_tau V(s') )^2
-
-    softmin_tau(X) = -tau * logsumexp(-X / tau)
-
-    Niente detach su value_parent: gradiente fluisce in entrambe le direzioni.
-    """
-    B_sub, max_n, C, H, W = children_padded.shape
-
-    children_flat = children_padded.view(B_sub * max_n, C, H, W)
-    h_children    = model.backbone(children_flat)
-    v_children    = model.value_head(h_children).view(B_sub, max_n)
-
-    INF      = torch.finfo(v_children.dtype).max / 2
-    v_masked = v_children.masked_fill(~child_mask, INF)
-    soft_min = -tau * torch.logsumexp(-v_masked / tau, dim=1)
-
-    residual = value_parent.squeeze(1) + soft_min
-    return (residual ** 2).mean()
-
-
-# ---------------------------------------------------------------------------
-# Utilita
+# Valutazione winrate contro frozen
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
-def compute_value_std(value_pred: torch.Tensor) -> float:
-    return value_pred.squeeze().float().std().item()
+def evaluate_vs_frozen(
+    main_mcts:   BatchedPointerMCTS,
+    n_games:     int = EVAL_GAMES,
+) -> tuple[float, int, int, int]:
+    """
+    Valutazione winrate usando play_games_batched — stessa infrastruttura del
+    self-play, frozen greedy senza MCTS. Molto più veloce della versione
+    sequenziale con get_best_move().
+
+    main_is_white è alternato automaticamente dall'indice pari/dispari del game
+    (i % 2 == 0 → main è bianco) — stessa logica della versione precedente.
+    """
+    wins = draws = losses = 0
+
+    _, terminals = main_mcts.play_games_batched(
+        n_games         = n_games,
+        num_simulations = NUM_SIMULATIONS,
+        temp_high       = 0.01,  # non zero: _visit_distribution fa 1/temp
+        temp_low        = 0.01,
+        temp_threshold  = 0,
+        max_moves       = MAX_MOVES,
+        start_fens      = None,
+    )
+
+    for terminal in terminals:
+        if terminal > 0:   wins   += 1
+        elif terminal < 0: losses += 1
+        else:              draws  += 1
+
+    winrate = (wins + 0.5 * draws) / n_games
+    return winrate, wins, draws, losses
 
 
-def bellman_tau(epoch: int) -> float:
-    if epoch <= WARMUP_EPOCHS:
-        return TAU_START
-    progress = (epoch - WARMUP_EPOCHS) / max(TOTAL_EPOCHS - WARMUP_EPOCHS, 1)
-    return TAU_START + progress * (TAU_FINAL - TAU_START)
+# ---------------------------------------------------------------------------
+# Training sul replay buffer
+# ---------------------------------------------------------------------------
+
+def train_on_buffer(
+    model:         JellyFishPointer,
+    optimizer:     Adam,
+    buffer:        list[dict],
+    n_steps:       int,
+    device:        torch.device,
+    curriculum_ds: CurriculumDataset2 = None,
+) -> dict:
+    model.train()
+
+    total_policy_loss = 0.0
+    total_value_loss  = 0.0
+
+    for _ in range(n_steps):
+        n_curriculum = int(BATCH_SIZE * MIXED_BUFFER_RATIO) if curriculum_ds else 0
+        n_buffer     = BATCH_SIZE - n_curriculum
+
+        batch = random.sample(buffer, min(n_buffer, len(buffer)))
+
+        if n_curriculum > 0 and curriculum_ds:
+            mixed = curriculum_ds.get_mixed_samples(n_curriculum)
+            batch = batch + mixed
+
+        board_tensors  = []
+        moves_tensors  = []
+        policy_targets = []
+        value_targets  = []
+
+        for step in batch:
+            board_tensors.append(encode_board(step["board_fen"]))
+            moves_tensors.append(step["legal_moves"])
+            policy_targets.append(step["policy_target"])
+            value_targets.append(step["value_target"])  # None per campioni curriculum
+
+        max_n = max(m.shape[0] for m in moves_tensors)
+        B     = len(batch)
+
+        moves_padded  = torch.zeros(B, max_n, MOVE_VECTOR_DIM, device=device)
+        move_mask     = torch.zeros(B, max_n, dtype=torch.bool,  device=device)
+        policy_padded = torch.zeros(B, max_n, device=device)
+
+        for i, (m, p) in enumerate(zip(moves_tensors, policy_targets)):
+            n = m.shape[0]
+            moves_padded[i, :n]  = m.to(device)
+            move_mask[i, :n]     = True
+            policy_padded[i, :n] = p.to(device)
+
+        boards_t = torch.stack(board_tensors).to(device)
+
+        # Maschera value loss: escludi campioni curriculum (value_target = None)
+        # I campioni buffer sono i primi n_buffer, i curriculum sono in coda
+        value_mask = torch.tensor(
+            [v is not None for v in value_targets],
+            dtype=torch.bool, device=device
+        )
+        # Sostituisci None con 0.0 per costruire il tensore (mascherato dopo)
+        values_clean = [v if v is not None else 0.0 for v in value_targets]
+        values_t = torch.tensor(values_clean, dtype=torch.float32, device=device).unsqueeze(1)
+
+        # Forward
+        logits, probs, value_pred = model(boards_t, moves_padded, move_mask)
+
+        # Policy loss — cross-entropy con distribuzione soft MCTS
+        log_probs   = torch.log(probs + 1e-8)
+        policy_loss = -(policy_padded * log_probs).sum(dim=1).mean()
+
+        # Value loss — solo sui campioni MCTS (non curriculum)
+        if value_mask.any():
+            value_loss = F.mse_loss(value_pred[value_mask], values_t[value_mask])
+        else:
+            value_loss = torch.tensor(0.0, device=device)
+
+        loss = policy_loss + VALUE_LOSS_WEIGHT * value_loss
+
+        optimizer.zero_grad()
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        total_policy_loss += policy_loss.item()
+        total_value_loss  += value_loss.item()
+
+    model.eval()
+
+    return {
+        "policy_loss": total_policy_loss / n_steps,
+        "value_loss":  total_value_loss  / n_steps,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Checkpoint
 # ---------------------------------------------------------------------------
 
-def save_checkpoint(model, optimizer, scheduler, epoch, val_loss, path):
+def save_checkpoint(state: dict, path: str, replay_buffer):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    torch.save({
-        "model":     model.state_dict(),
-        "optimizer": optimizer.state_dict(),
-        "scheduler": scheduler.state_dict() if scheduler else None,
-        "epoch":     epoch,
-        "val_loss":  val_loss,
-    }, tmp)
-    os.replace(tmp, path)
-    tqdm.write(f"  -> checkpoint: {path}  (epoch {epoch}, val_loss {val_loss:.4f})")
+
+    # Salvataggio atomico buffer
+    buffer_path = path.replace(".pt", "_buffer.pkl")
+    buffer_tmp  = buffer_path + ".tmp"
+    with open(buffer_tmp, "wb") as f:
+        pickle.dump(list(replay_buffer), f)
+    os.replace(buffer_tmp, buffer_path)
+
+    # Salvataggio atomico checkpoint
+    tmp_path = path + ".tmp"
+    torch.save(state, tmp_path)
+    os.replace(tmp_path, path)
+
+    tqdm.write(f"  → checkpoint salvato: {path}")
 
 
-def load_checkpoint(path, model, optimizer=None, scheduler=None):
+def load_checkpoint(path, model, optimizer, scheduler, replay_buffer):
     ckpt = torch.load(path, map_location=DEVICE)
-    sd   = ckpt.get("model", ckpt)
-    if any(k.startswith("_orig_mod.") for k in sd.keys()):
-        sd = {k.replace("_orig_mod.", ""): v for k, v in sd.items()}
-    model.load_state_dict(sd)
-    if optimizer and "optimizer" in ckpt:
-        try:    optimizer.load_state_dict(ckpt["optimizer"])
-        except Exception: pass
-    if scheduler and "scheduler" in ckpt and ckpt["scheduler"]:
-        try:    scheduler.load_state_dict(ckpt["scheduler"])
-        except Exception: pass
-    epoch    = ckpt.get("epoch", 0)
-    val_loss = ckpt.get("val_loss", float("inf"))
-    tqdm.write(f"  -> caricato: {path}  (epoch {epoch})")
-    return epoch, val_loss
 
+    state_dict = ckpt["model"]
+    if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
+        state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+    model.load_state_dict(state_dict)
 
-# ---------------------------------------------------------------------------
-# Epoch
-# ---------------------------------------------------------------------------
+    if "optimizer" in ckpt:
+        optimizer.load_state_dict(ckpt["optimizer"])
+    if "scheduler" in ckpt and scheduler is not None:
+        scheduler.load_state_dict(ckpt["scheduler"])
 
-def run_epoch(model, loader, optimizer, device,
-              train=True, freeze_backbone=False,
-              use_bellman=False, tau=TAU_START):
+    epoch     = ckpt.get("epoch", 0)
+    best_wr   = ckpt.get("best_winrate", 0.0)
+    frozen_sd = ckpt.get("frozen_state_dict", None)
 
-    model.train() if train else model.eval()
+    tqdm.write(f"  → checkpoint caricato: {path}  (epoch {epoch}, best winrate {best_wr:.3f})")
 
-    if freeze_backbone:
-        for p in model.backbone.parameters():     p.requires_grad = False
-        for p in model.move_encoder.parameters(): p.requires_grad = False
-    else:
-        for p in model.parameters(): p.requires_grad = True
+    buffer_path = path.replace(".pt", "_buffer.pkl")
+    if os.path.exists(buffer_path):
+        with open(buffer_path, "rb") as f:
+            loaded = pickle.load(f)
+        replay_buffer.extend(loaded)
+        tqdm.write(f"  → buffer caricato: {len(replay_buffer)} step")
 
-    total_p, total_v, total_b, total_acc = 0.0, 0.0, 0.0, 0.0
-    vstd_list       = []
-    bellman_skipped = 0
-    n_batches       = 0
-
-    ctx = torch.no_grad() if not train else torch.enable_grad()
-
-    with ctx:
-        for batch in tqdm(loader, leave=False):
-            boards_t      = batch["boards_t"].to(device)
-            moves_padded  = batch["moves_padded"].to(device)
-            move_mask     = batch["move_mask"].to(device)
-            policy_padded = batch["policy_padded"].to(device)
-            values_t      = batch["values_t"].to(device)
-            fens          = batch["fens"]
-
-            _, probs, value_pred = model(boards_t, moves_padded, move_mask)
-
-            log_probs   = torch.log(probs + 1e-8)
-            policy_loss = -(policy_padded * log_probs).sum(dim=1).mean()
-            value_loss  = F.mse_loss(value_pred, values_t)
-            loss        = policy_loss + VALUE_LOSS_WEIGHT * value_loss
-
-            b_loss_val = torch.tensor(0.0, device=device)
-
-            # Bellman: solo in training, solo dopo warmup
-            if train and use_bellman:
-                vstd = compute_value_std(value_pred)
-                if vstd < VALUE_COLLAPSE_THRESH:
-                    bellman_skipped += 1
-                else:
-                    has_children = move_mask.any(dim=1)
-                    valid_idx    = has_children.nonzero(as_tuple=True)[0]
-                    if len(valid_idx) > 0:
-                        sub_idx  = valid_idx[
-                            torch.randperm(len(valid_idx), device=device)[:BELLMAN_SUBSAMPLE]
-                        ]
-                        sub_fens = [fens[i] for i in sub_idx.cpu().tolist()]
-                        children_padded, child_mask = build_children_batch(sub_fens, device)
-                        b_loss_val = bellman_consistency_loss(
-                            model, children_padded, child_mask,
-                            value_pred[sub_idx], tau,
-                        )
-                        loss = loss + BELLMAN_WEIGHT * b_loss_val
-
-            if train:
-                optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), max_norm=GRAD_CLIP)
-                optimizer.step()
-
-            with torch.no_grad():
-                vstd_list.append(compute_value_std(value_pred))
-                pred_idx   = probs.argmax(dim=1)
-                target_idx = policy_padded.argmax(dim=1)
-                total_acc += (pred_idx == target_idx).float().mean().item()
-
-            total_p += policy_loss.item()
-            total_v += value_loss.item()
-            total_b += b_loss_val.item()
-            n_batches += 1
-
-    d = max(n_batches, 1)
-    return {
-        "policy_loss":     total_p   / d,
-        "value_loss":      total_v   / d,
-        "bellman_loss":    total_b   / d,
-        "accuracy":        total_acc / d,
-        "value_std":       sum(vstd_list) / max(len(vstd_list), 1),
-        "bellman_skipped": bellman_skipped,
-    }
+    return epoch, best_wr, frozen_sd
 
 
 # ---------------------------------------------------------------------------
@@ -340,110 +402,198 @@ def run_epoch(model, loader, optimizer, device,
 
 def main():
     print(f"Device: {DEVICE}")
-    print(f"Fase 1 (no Bellman, veloce): epoche 1-{WARMUP_EPOCHS}")
-    print(f"Fase 2 (Bellman lambda={BELLMAN_WEIGHT}): epoche {WARMUP_EPOCHS+1}-{TOTAL_EPOCHS}")
-    print(f"tau: {TAU_START} -> {TAU_FINAL}   AdamW weight_decay={WEIGHT_DECAY}\n")
 
-    df = pd.read_csv(FILTERED_CSV)
-    print(f"Posizioni raw: {len(df):,}")
-    if MAX_SAMPLES and len(df) > MAX_SAMPLES:
-        df = df.sample(n=MAX_SAMPLES, random_state=42)
-    df = df.dropna(subset=["fen", "move_uci", "outcome"])
-    df = df[df["outcome"].isin([1.0, 0.0, -1.0])]
-    print(f"Posizioni dopo pulizia: {len(df):,}")
+    main_model   = JellyFishPointer().to(DEVICE)
+    frozen_model = JellyFishPointer().to(DEVICE)
 
-    val_size = max(1000, int(len(df) * VAL_FRACTION))
-    val_df   = df.sample(n=val_size, random_state=42)
-    train_df = df.drop(val_df.index)
-    print(f"Train: {len(train_df):,}  |  Val: {len(val_df):,}\n")
+    optimizer = build_optimizer(main_model)
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=40)
 
-    train_loader = DataLoader(
-        LichessDataset(train_df), batch_size=BATCH_SIZE, shuffle=True,
-        collate_fn=collate_fn, num_workers=NUM_WORKERS, pin_memory=True,
-    )
-    val_loader = DataLoader(
-        LichessDataset(val_df), batch_size=BATCH_SIZE, shuffle=False,
-        collate_fn=collate_fn, num_workers=NUM_WORKERS, pin_memory=True,
-    )
+    start_epoch  = 1
+    best_winrate = 0.0
+    replay_buffer: deque[dict] = deque(maxlen=BUFFER_SIZE)
 
-    model = JellyFishPointer().to(DEVICE)
+    az_last = os.path.join(AZ_CHECKPOINT_DIR, "last.pt")
+    az_best = os.path.join(AZ_CHECKPOINT_DIR, "best.pt")
 
-    if os.path.exists(CHECKPOINT_IN):
-        ckpt = torch.load(CHECKPOINT_IN, map_location=DEVICE)
-        sd   = ckpt.get("model", ckpt)
-        if any(k.startswith("_orig_mod.") for k in sd.keys()):
-            sd = {k.replace("_orig_mod.", ""): v for k, v in sd.items()}
-        model.load_state_dict(sd)
-        print(f"Checkpoint caricato: {CHECKPOINT_IN}")
-    else:
-        print("Nessun checkpoint — parto da zero.")
-
-    optimizer = AdamW([
-        {"params": list(model.backbone.parameters()) +
-                   list(model.move_encoder.parameters()),
-         "lr": LR_BACKBONE, "weight_decay": WEIGHT_DECAY},
-        {"params": list(model.policy_head.parameters()) +
-                   list(model.value_head.parameters()),
-         "lr": LR_HEADS, "weight_decay": WEIGHT_DECAY},
-    ])
-
-    scheduler     = CosineAnnealingLR(optimizer, T_max=TOTAL_EPOCHS, eta_min=1e-6)
-    best_val_loss = float("inf")
-    start_epoch   = 1
-
-    if os.path.exists(CHECKPOINT_OUT):
-        start_epoch, best_val_loss = load_checkpoint(
-            CHECKPOINT_OUT, model, optimizer, scheduler
+    if os.path.exists(az_last):
+        print("Checkpoint AlphaZero trovato, riprendo...")
+        start_epoch, _, frozen_sd = load_checkpoint(
+            az_last, main_model, optimizer, scheduler, replay_buffer
         )
         start_epoch += 1
 
-    print(f"Parametri: {sum(p.numel() for p in model.parameters()):,}\n")
+        # Leggi best_winrate dal best.pt separatamente
+        if os.path.exists(az_best):
+            best_ckpt    = torch.load(az_best, map_location=DEVICE)
+            best_winrate = best_ckpt.get("best_winrate", 0.0)
+            tqdm.write(f"  → best winrate storico: {best_winrate:.3f}")
 
-    for epoch in range(start_epoch, TOTAL_EPOCHS + 1):
-        freeze      = epoch <= FREEZE_EPOCHS
-        use_bellman = epoch > WARMUP_EPOCHS
-        tau         = bellman_tau(epoch)
-        phase       = "warmup          " if not use_bellman else f"bellman tau={tau:.2f}"
+        if frozen_sd is not None:
+            if any(k.startswith("_orig_mod.") for k in frozen_sd.keys()):
+                frozen_sd = {k.replace("_orig_mod.", ""): v for k, v in frozen_sd.items()}
+            frozen_model.load_state_dict(frozen_sd)
+        else:
+            frozen_model.load_state_dict(main_model.state_dict())
 
-        train_s = run_epoch(
-            model, train_loader, optimizer, DEVICE,
-            train=True, freeze_backbone=freeze,
-            use_bellman=use_bellman, tau=tau,
+    elif os.path.exists(SUPERVISED_CHECKPOINT):
+        print(f"Carico supervised: {SUPERVISED_CHECKPOINT}")
+        ckpt = torch.load(SUPERVISED_CHECKPOINT, map_location=DEVICE)
+        main_model.load_state_dict(ckpt["model"])
+        frozen_model.load_state_dict(ckpt["model"])
+        buffer_path = SUPERVISED_CHECKPOINT.replace(".pt", "_buffer.pkl")
+        if os.path.exists(buffer_path):
+            with open(buffer_path, "rb") as f:
+                loaded = pickle.load(f)
+            replay_buffer.extend(loaded)
+            tqdm.write(f"  → buffer caricato: {len(replay_buffer)} step")
+
+    else:
+        print("Nessun checkpoint trovato, parto da zero.")
+        frozen_model.load_state_dict(main_model.state_dict())
+
+    # Ripristina LR esplicitamente (override del checkpoint)
+    for group in optimizer.param_groups:
+        if group["name"] == "backbone":
+            group["lr"] = LR_BACKBONE
+        else:
+            group["lr"] = LR_HEADS
+
+    scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=40)
+
+    frozen_model.eval()
+    for p in frozen_model.parameters():
+        p.requires_grad = False
+
+    main_model.eval()
+
+    # Curriculum dataset
+    curriculum_ds = None
+    if os.path.exists(CURRICULUM_CSV):
+        curriculum_ds = CurriculumDataset2(CURRICULUM_CSV)
+    else:
+        tqdm.write(f"  WARNING: {CURRICULUM_CSV} non trovato, curriculum disabilitato")
+
+    # Istanze MCTS
+    main_mcts   = BatchedPointerMCTS(main_model,   DEVICE, c_puct=2.5)
+    frozen_mcts = BatchedPointerMCTS(frozen_model, DEVICE, c_puct=2.5)
+
+    print(f"Parametri: {sum(p.numel() for p in main_model.parameters()):,}")
+    print(f"Inizio AlphaZero training per {EPOCHS} epoche (da epoca {start_epoch})\n")
+
+    epoch_bar = tqdm(range(start_epoch, EPOCHS + 1), desc="Epoche AZ", dynamic_ncols=True)
+
+    for epoch in epoch_bar:
+
+        # ----------------------------------------------------------------
+        # Self-play batched con curriculum
+        # ----------------------------------------------------------------
+        wins = draws = losses = 0
+        new_steps = 0
+
+        # Prepara FEN di partenza: CURRICULUM_PROB% dal dataset tattico
+        start_fens = []
+        for i in range(GAMES_PER_EPOCH):
+            if curriculum_ds and random.random() < CURRICULUM_PROB:
+                start_fens.append(curriculum_ds.get_random_fen())
+            else:
+                start_fens.append(None)
+
+        tqdm.write(f"  Epoch {epoch:03d} [self-play batched {GAMES_PER_EPOCH} partite, "
+                   f"{sum(f is not None for f in start_fens)} curriculum]...")
+
+        all_steps, terminals = main_mcts.play_games_batched(
+            n_games         = GAMES_PER_EPOCH,
+            num_simulations = NUM_SIMULATIONS,
+            temp_high       = TEMP_HIGH,
+            temp_low        = TEMP_LOW,
+            temp_threshold  = TEMP_THRESHOLD,
+            max_moves       = MAX_MOVES,
+            start_fens      = start_fens,
         )
-        val_s = run_epoch(
-            model, val_loader, optimizer, DEVICE,
-            train=False, use_bellman=False,
+
+        tqdm.write(f"  Debug: len(all_steps)={len(all_steps)}, "
+           f"steps per game={[len(s) for s in all_steps[:5]]}, "
+           f"new_steps={new_steps}")
+
+        for steps, terminal in zip(all_steps, terminals):
+            replay_buffer.extend(steps)
+            new_steps += len(steps)
+            if terminal > 0:   wins   += 1
+            elif terminal < 0: losses += 1
+            else:              draws  += 1
+
+        # ----------------------------------------------------------------
+        # Training sul buffer
+        # ----------------------------------------------------------------
+        if len(replay_buffer) >= MIN_BUFFER:
+            loss_stats = train_on_buffer(
+                main_model, optimizer, list(replay_buffer),
+                TRAIN_STEPS, DEVICE, curriculum_ds
+            )
+            p_loss_str = f"{loss_stats['policy_loss']:.4f}"
+            v_loss_str = f"{loss_stats['value_loss']:.4f}"
+        else:
+            p_loss_str = "N/A (buffer piccolo)"
+            v_loss_str = "N/A"
+            tqdm.write(f"  Buffer troppo piccolo ({len(replay_buffer)}/{MIN_BUFFER}), salto training.")
+
+        # ----------------------------------------------------------------
+        # Valutazione winrate contro frozen
+        # ----------------------------------------------------------------
+        tqdm.write(f"  Valutazione contro frozen ({EVAL_GAMES} partite)...")
+        winrate, w, d, l = evaluate_vs_frozen(main_mcts)
+        tqdm.write(f"  Winrate: {winrate:.3f}  (W{w}/D{d}/L{l})")
+
+        frozen_updated = False
+        if winrate >= WINRATE_THRESHOLD:
+            frozen_model.load_state_dict(main_model.state_dict())
+            frozen_model.eval()
+            for p in frozen_model.parameters():
+                p.requires_grad = False
+            frozen_mcts = BatchedPointerMCTS(frozen_model, DEVICE, c_puct=2.5)
+            frozen_updated = True
+            tqdm.write(f"  ★ Frozen aggiornato! Winrate: {winrate:.3f}")
+
+        scheduler.step(winrate)
+
+        tqdm.write(
+            f"Epoch {epoch:03d} | "
+            f"Self-play W/D/L: {wins}/{draws}/{losses}  "
+            f"buf: {len(replay_buffer)}  "
+            f"new_steps: {new_steps}  "
+            f"winrate_vs_frozen: {winrate:.3f}"
+            f"{'  [frozen aggiornato]' if frozen_updated else ''}  "
+            f"p_loss: {p_loss_str}  "
+            f"v_loss: {v_loss_str}  "
+            f"LR: {optimizer.param_groups[1]['lr']:.2e}"
         )
 
-        scheduler.step()
+        checkpoint_state = {
+            "epoch":             epoch,
+            "model":             main_model.state_dict(),
+            "frozen_state_dict": frozen_model.state_dict(),
+            "optimizer":         optimizer.state_dict(),
+            "scheduler":         scheduler.state_dict(),
+            "best_winrate":      best_winrate,
+        }
 
-        print(
-            f"Epoch {epoch:03d}/{TOTAL_EPOCHS} [{phase}] | "
-            f"train  p:{train_s['policy_loss']:.4f} v:{train_s['value_loss']:.4f} "
-            f"b:{train_s['bellman_loss']:.4f} acc:{train_s['accuracy']:.3f} "
-            f"vstd:{train_s['value_std']:.3f}  |  "
-            f"val  p:{val_s['policy_loss']:.4f} v:{val_s['value_loss']:.4f} "
-            f"acc:{val_s['accuracy']:.3f} vstd:{val_s['value_std']:.3f}"
-        )
+        save_checkpoint(checkpoint_state, az_last, replay_buffer)
 
-        if train_s["bellman_skipped"] > 0:
-            print(f"  ATTENZIONE collasso: Bellman saltato in "
-                  f"{train_s['bellman_skipped']} batch (vstd < {VALUE_COLLAPSE_THRESH})")
+        if winrate > best_winrate:
+            best_winrate = winrate
+            checkpoint_state["best_winrate"] = best_winrate
+            save_checkpoint(checkpoint_state, az_best, replay_buffer)
+            tqdm.write(f"  ★ Nuovo best winrate: {best_winrate:.3f}")
 
-        gap = val_s["policy_loss"] - train_s["policy_loss"]
-        if gap > 0.8:
-            print(f"  ATTENZIONE overfitting: gap train/val = {gap:.3f} "
-                  f"— considera piu dati o weight_decay piu alto")
+        epoch_bar.set_postfix({
+            "winrate": f"{winrate:.3f}",
+            "best":    f"{best_winrate:.3f}",
+            "buf":     len(replay_buffer),
+            "frozen":  "✓" if frozen_updated else "-",
+        })
 
-        save_checkpoint(model, optimizer, scheduler, epoch,
-                        val_s["policy_loss"], CHECKPOINT_OUT)
-        if val_s["policy_loss"] < best_val_loss:
-            best_val_loss = val_s["policy_loss"]
-            save_checkpoint(model, optimizer, scheduler, epoch,
-                            best_val_loss, os.path.join(CHECKPOINT_DIR, "best.pt"))
-            print(f"  * Nuovo best val policy_loss: {best_val_loss:.4f}")
-
-    print(f"\nCompletato. Best val policy_loss: {best_val_loss:.4f}")
+    print(f"\nTraining completato. Best winrate: {best_winrate:.3f}")
 
 
 if __name__ == "__main__":

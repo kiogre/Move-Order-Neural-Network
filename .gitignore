@@ -25,3 +25,6 @@ meta.json
 n_children.npy
 child_fens.npy
 lichess_db_eval.jsonl.zst
+stockfish_lichess_60m.csv
+stockfish_lichess_fixed.csv
+stockfish_lichess_60m_fixed.csv

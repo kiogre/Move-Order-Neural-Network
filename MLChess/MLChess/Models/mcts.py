@@ -107,7 +107,15 @@ class MCTSNode:
         total = self.visit_count + self.virtual_loss
         if total == 0:
             return 0.0
-        return (self.value_sum - self.virtual_loss) / total
+        # NOTA: virtual_loss va SOMMATO, non sottratto. Il genitore valuta
+        # ogni figlio con q = -child.Q (vedi puct_score). Se virtual_loss
+        # riducesse Q qui, il genitore vedrebbe -Q aumentare -> il nodo
+        # diventerebbe PIU' attraente proprio mentre e' gia' impegnato in
+        # un'altra traiettoria dello stesso batch round: l'opposto dello
+        # scopo della virtual loss (diversificare le foglie del batch).
+        # Sommando virtual_loss, il nodo si "autodichiara" via via migliore
+        # dalla propria prospettiva, cosi' -Q cala e il genitore lo evita.
+        return (self.value_sum + self.virtual_loss) / total
 
     def puct_score(self, c_puct: float, fpu_value: float = -0.1) -> float:
         """

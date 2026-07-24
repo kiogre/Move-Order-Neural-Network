@@ -109,8 +109,12 @@ class MCTSNode:
         total_visits = self.visit_count + self.virtual_loss
         if total_visits == 0:
             return 0.0
-        # Virtual loss penalizza come se le visite pendenti fossero tutte -1
-        return (self.value_sum - self.virtual_loss) / total_visits
+        # Vedi puct_score: il genitore valuta ogni figlio con q = -self.Q.
+        # Sottrarre virtual_loss qui fa scendere Q, quindi -Q sale: il nodo
+        # con visite pendenti diventerebbe PIU' attraente, l'opposto dello
+        # scopo della virtual loss. Va sommato, cosi' il nodo "si dichiara"
+        # via via migliore dalla propria prospettiva e -Q scende.
+        return (self.value_sum + self.virtual_loss) / total_visits
 
     def puct_score(self, c_puct: float, fpu_value: float = -0.1) -> float:
         assert self.parent is not None
@@ -146,6 +150,12 @@ class GameState:
         # Albero MCTS corrente — sopravvive tra mosse (tree reuse)
         self.root: Optional[MCTSNode] = None
 
+        # Tracking per resignation anticipata (vedi _maybe_resign)
+        self.resign_streak: int = 0
+        self.resign_sign:   int = 0   # 0 = nessuno, +1/-1 = a favore del Bianco/Nero
+        self.resigned:       bool = False
+        self.forced_white_result: Optional[float] = None
+
 
 # ---------------------------------------------------------------------------
 # BatchedPointerMCTS
@@ -168,7 +178,23 @@ class BatchedPointerMCTS:
         dirichlet_alpha:   float = 0.3,
         dirichlet_epsilon: float = 0.25,
         leaves_per_tree:   int   = 32,
+        draw_value:        float = 0.0,
+        resign_threshold:  Optional[float] = 0.90,
+        resign_moves:      int   = 8,
+        resign_min_move:   int   = 20,
     ):
+        """
+        draw_value: valore assegnato a una patta VERA (ripetizione, 50 mosse,
+            stallo, materiale insufficiente), simmetrico per entrambi i lati
+            (contempt): scoraggia la ricerca dal cercare/accontentarsi della
+            patta senza dover decidere chi fosse in vantaggio. 0.0 per
+            disabilitare e tornare al comportamento neutro precedente.
+        resign_threshold: se non None, una partita di self-play termina in
+            anticipo (assegnando il risultato deciso) quando root.Q, convertito
+            in prospettiva Bianco, resta oltre questa soglia in valore assoluto
+            per `resign_moves` mosse consecutive dello stesso segno, dopo
+            almeno `resign_min_move` semi-mosse giocate. None disabilita.
+        """
         self.model             = model
         self.device            = device
         self.c_puct            = c_puct
@@ -176,6 +202,10 @@ class BatchedPointerMCTS:
         self.dirichlet_alpha   = dirichlet_alpha
         self.dirichlet_epsilon = dirichlet_epsilon
         self.leaves_per_tree   = leaves_per_tree
+        self.draw_value        = draw_value
+        self.resign_threshold  = resign_threshold
+        self.resign_moves      = resign_moves
+        self.resign_min_move   = resign_min_move
 
     # ------------------------------------------------------------------
     # Interfaccia pubblica: singola posizione (valutazione greedy)
@@ -322,6 +352,9 @@ class BatchedPointerMCTS:
                     self._finalize_game(g)
                     continue
 
+                if self._maybe_resign(g):
+                    continue
+
                 temp = temp_high if g.move_num < temp_threshold else temp_low
                 move = self._select_move(g.root, temp)
 
@@ -370,13 +403,25 @@ class BatchedPointerMCTS:
         # ----------------------------------------------------------------
         all_steps     = []
         white_results = []
+        n_resigned    = 0
         for g in games:
             white_result = self._white_result(g)
             for step in g.steps:
+                # NOTA: qui NON applichiamo draw_value. Il contempt vive
+                # solo in _terminal_value (influenza la ricerca/self-play),
+                # non nel target di training: la rete deve continuare a
+                # imparare il valore VERO della patta (0.0), altrimenti il
+                # value head smette di essere calibrato per le posizioni
+                # davvero equilibrate — vedi discussione sul rischio di
+                # "rifiutare" patte oggettivamente corrette.
                 board_turn = chess.Board(step["board_fen"]).turn
                 step["value_target"] = white_result if board_turn == chess.WHITE else -white_result
             all_steps.append(g.steps)
             white_results.append(white_result)
+            n_resigned += int(g.resigned)
+
+        if n_resigned > 0:
+            print(f"  [BatchedPointerMCTS] {n_resigned}/{len(games)} partite chiuse per resignation")
 
         return all_steps, white_results
 
@@ -571,7 +616,7 @@ class BatchedPointerMCTS:
     def _terminal_value(self, node: MCTSNode) -> float:
         outcome = node.board.outcome(claim_draw=True)
         if outcome is None or outcome.winner is None:
-            return 0.0
+            return self.draw_value  # contempt simmetrico, vedi __init__
         return 1.0 if outcome.winner == node.board.turn else -1.0
 
     def _finalize_game(self, g: GameState):
@@ -581,12 +626,52 @@ class BatchedPointerMCTS:
 
     def _white_result(self, g: GameState) -> float:
         """Esito della partita dal punto di vista del Bianco: +1/-1/0."""
+        if g.forced_white_result is not None:
+            return g.forced_white_result
         result = g.result or g.board.result()
         if result == "1-0":
             return 1.0
         elif result == "0-1":
             return -1.0
         return 0.0
+
+    def _maybe_resign(self, g: GameState) -> bool:
+        """
+        Controlla se root.Q (appena calcolato dalle simulazioni sulla mossa
+        corrente) resta schiacciante e coerente per resign_moves mosse di
+        fila; in tal caso chiude la partita subito invece di giocarla fino
+        a max_moves, assegnando il risultato deciso. Ritorna True se la
+        partita e' stata chiusa per resignation (il chiamante deve saltarla).
+
+        root.Q e' dalla prospettiva di chi deve muovere alla radice: lo
+        convertiamo in prospettiva Bianco per confrontare segni coerenti
+        mossa dopo mossa (la prospettiva "chi muove" si alterna ad ogni ply,
+        quella Bianco no).
+        """
+        if self.resign_threshold is None or g.move_num < self.resign_min_move:
+            return False
+        if g.root is None or (g.root.visit_count + g.root.virtual_loss) == 0:
+            return False
+
+        q_white = g.root.Q if g.board.turn == chess.WHITE else -g.root.Q
+
+        if abs(q_white) >= self.resign_threshold:
+            sign = 1 if q_white > 0 else -1
+            if sign == g.resign_sign:
+                g.resign_streak += 1
+            else:
+                g.resign_sign   = sign
+                g.resign_streak = 1
+        else:
+            g.resign_sign   = 0
+            g.resign_streak = 0
+
+        if g.resign_streak >= self.resign_moves:
+            g.forced_white_result = float(g.resign_sign)
+            g.resigned = True
+            self._finalize_game(g)
+            return True
+        return False
 
     def _add_dirichlet_noise(self, root: MCTSNode):
         if not root.children:
