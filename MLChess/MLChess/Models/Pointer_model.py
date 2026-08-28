@@ -30,46 +30,27 @@ class MoveEncoder(nn.Module):
         return self.net(moves)
 
 class PointerPolicyHead(nn.Module):
-    """
-    Dato il contesto h dal backbone e gli embedding delle mosse legali,
-    restituisce una distribuzione di probabilità sulle mosse legali.
- 
-    Args:
-        backbone_dim : dimensione del vettore h dal backbone (default 512)
-        move_emb_dim : dimensione dell'embedding delle mosse (default 128)
- 
-    Forward:
-        h          : [batch, backbone_dim]
-        move_embs  : [batch, n_mosse, move_emb_dim]
-        move_mask  : [batch, n_mosse] bool, True = mossa reale, False = padding
-                     (opzionale, serve solo se usi batching con padding)
- 
-    Returns:
-        logits : [batch, n_mosse]   — score grezzi (usa per la loss)
-        probs  : [batch, n_mosse]   — softmax sui soli slot reali
-    """
     def __init__(self, backbone_dim: int = 512, move_emb_dim: int = 128):
         super().__init__()
-        # Proiettiamo h nello stesso spazio degli embedding delle mosse
         self.query_proj = nn.Linear(backbone_dim, move_emb_dim)
-        self.scale      = math.sqrt(move_emb_dim)
- 
+        self.scale = math.sqrt(move_emb_dim)
+
     def forward(
         self,
-        h: torch.Tensor,
-        move_embs: torch.Tensor,
-        move_mask: torch.Tensor | None = None,
+        h: torch.Tensor,         # [batch, backbone_dim]
+        move_embs: torch.Tensor, # [batch, n_mosse, move_emb_dim]
+        move_mask: torch.Tensor  # [batch, n_mosse] bool -> Obbligatorio!
     ):
         # query: [batch, 1, move_emb_dim]
         query = self.query_proj(h).unsqueeze(1)
- 
-        # scores: [batch, n_mosse]
-        scores = (query * move_embs).sum(dim=-1) / self.scale
- 
-        # Azzera il padding prima del softmax
-        if move_mask is not None:
-            scores = scores.masked_fill(~move_mask, float('-inf'))
- 
+
+        # Prodotto scalare per l'Attention: [batch, n_mosse]
+        # Equivalente a (query * move_embs).sum(dim=-1) ma più esplicito per ONNX
+        scores = torch.bmm(move_embs, query.transpose(1, 2)).squeeze(-1) / self.scale
+
+        # Usiamo un valore finito negativo al posto di -inf per evitare NaN in ONNX
+        scores = scores.masked_fill(~move_mask, -1e9)
+
         probs = torch.softmax(scores, dim=-1)
         return scores, probs
 
@@ -90,41 +71,30 @@ class ValueHead(nn.Module):
     def forward(self, h: torch.Tensor) -> torch.Tensor:
         return self.net(h)
 
+
 class JellyFishPointer(nn.Module):
-    """
-    Architettura completa con pointer attention per la policy.
- 
-    Input:
-        board      : [batch, 13, 8, 8]
-        moves      : [batch, n_mosse, 46]   — mosse legali encodate
-        move_mask  : [batch, n_mosse] bool  — True = slot reale (opzionale)
- 
-    Output:
-        logits     : [batch, n_mosse]       — per CrossEntropyLoss
-        probs      : [batch, n_mosse]       — distribuzione policy
-        value      : [batch, 1]             — valore posizione
-    """
     def __init__(
         self,
         backbone_layers: list[int] = [2, 2, 2, 2],
-        move_emb_dim:    int       = 128,
+        move_emb_dim: int = 128,
     ):
         super().__init__()
-        self.backbone     = ChessBackbone(layers=backbone_layers)
+        # Assicurati di importare i tuoi moduli corretti
+        self.backbone = ChessBackbone(layers=backbone_layers)
         self.move_encoder = MoveEncoder(move_emb_dim=move_emb_dim)
-        self.policy_head  = PointerPolicyHead(backbone_dim=512, move_emb_dim=move_emb_dim)
-        self.value_head   = ValueHead(backbone_dim=512)
- 
+        self.policy_head = PointerPolicyHead(backbone_dim=512, move_emb_dim=move_emb_dim)
+        self.value_head = ValueHead(backbone_dim=512)
+
     def forward(
         self,
-        board:     torch.Tensor,
-        moves:     torch.Tensor,
-        move_mask: torch.Tensor | None = None,
+        board: torch.Tensor,
+        moves: torch.Tensor,
+        move_mask: torch.Tensor  # Non più opzionale
     ):
-        h          = self.backbone(board)              # [batch, 512]
-        move_embs  = self.move_encoder(moves)          # [batch, n_mosse, 128]
+        h = self.backbone(board)
+        move_embs = self.move_encoder(moves)
         logits, probs = self.policy_head(h, move_embs, move_mask)
-        value      = self.value_head(h)                # [batch, 1]
+        value = self.value_head(h)
         return logits, probs, value
     
 
