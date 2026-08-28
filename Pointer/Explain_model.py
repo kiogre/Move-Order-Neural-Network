@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 # Carica il modello
 model = JellyFishPointer()
-ckpt  = torch.load("./checkpoints_az_v3/last.pt", map_location="cpu")
+ckpt  = torch.load("./checkpoints_pointer_60m_from_fast/best.pt", map_location="cpu")
 state_dict = ckpt["model"]
 if any(k.startswith("_orig_mod.") for k in state_dict.keys()):
     state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}

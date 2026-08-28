@@ -55,6 +55,14 @@ from ..Representation.pointer_dataset import encode_board, encode_legal_moves
 
 MOVE_VECTOR_DIM = 46
 
+# Profondità dello stack (move_stack/_stack) copiata da chess.Board.copy().
+# 100 semi-mosse bastano per rilevare ripetizioni reali e per la regola delle
+# 50 mosse (che ne richiede esattamente 100). Senza questo limite, ogni
+# child_board.copy() duplica l'intera storia della partita, e il costo
+# cresce linearmente col numero di semi-mosse già giocate — su 64 partite
+# in parallelo con partite lunghe, questo satura la RAM.
+MCTS_STACK_DEPTH = 100
+
 
 # ---------------------------------------------------------------------------
 # Nodo MCTS — con cache board_tensor e legal_moves
@@ -217,7 +225,7 @@ class BatchedPointerMCTS:
         num_simulations: int   = 100,
         temperature:     float = 0.0,
     ) -> chess.Move:
-        root = MCTSNode(board.copy())
+        root = MCTSNode(board.copy(stack=MCTS_STACK_DEPTH))
         self._expand_nodes_batched([root])
         self._add_dirichlet_noise(root)
         root.visit_count = 1
@@ -230,7 +238,7 @@ class BatchedPointerMCTS:
         num_simulations: int   = 100,
         temperature:     float = 1.0,
     ) -> dict[chess.Move, float]:
-        root = MCTSNode(board.copy())
+        root = MCTSNode(board.copy(stack=MCTS_STACK_DEPTH))
         self._expand_nodes_batched([root])
         self._add_dirichlet_noise(root)
         root.visit_count = 1
@@ -392,7 +400,7 @@ class BatchedPointerMCTS:
                     self._finalize_game(g)
                 elif g.root is None:
                     # Figlio non esplorato — costruisci root fresco
-                    g.root = MCTSNode(g.board.copy())
+                    g.root = MCTSNode(g.board.copy(stack=MCTS_STACK_DEPTH))
                     self._expand_nodes_batched([g.root])
                     self._add_dirichlet_noise(g.root)
                     g.root.visit_count = 1
@@ -462,7 +470,7 @@ class BatchedPointerMCTS:
     def _expand_roots_batched(self, games: list[GameState]):
         roots = []
         for g in games:
-            g.root = MCTSNode(g.board.copy())
+            g.root = MCTSNode(g.board.copy(stack=MCTS_STACK_DEPTH))
             roots.append(g.root)
         self._expand_nodes_batched(roots)
         for root in roots:
@@ -545,7 +553,7 @@ class BatchedPointerMCTS:
             node.is_expanded = True
 
             for j, move in enumerate(legal_moves):
-                child_board = node.board.copy()
+                child_board = node.board.copy(stack=MCTS_STACK_DEPTH)
                 child_board.push(move)
                 node.children[move] = MCTSNode(
                     board  = child_board,

@@ -206,7 +206,7 @@ class ChessPointerExplainer:
         ax3 = fig.add_subplot(gs[0, 2])
         
         att_from, att_to, _ = self.visualize_move_probabilities(
-            board_tensor, legal_moves, move_mask, board=None
+            board_tensor, legal_moves, move_mask, board=board   # era board=None
         )
         ax2.imshow(att_from[::-1], cmap='hot')
         ax2.set_title('Attention FROM')

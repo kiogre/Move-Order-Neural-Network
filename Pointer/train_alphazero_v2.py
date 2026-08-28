@@ -44,8 +44,8 @@ MOVE_VECTOR_DIM = 46
 # Configurazione
 # ---------------------------------------------------------------------------
 
-SUPERVISED_CHECKPOINT = "checkpoints_pointer_20_from_fast/best.pt"
-AZ_CHECKPOINT_DIR     = "checkpoints_az_v2"
+SUPERVISED_CHECKPOINT = "checkpoints_pointer_60m_from_fast/best.pt"
+AZ_CHECKPOINT_DIR     = "checkpoints_az_v2_60m"
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -121,7 +121,7 @@ class CurriculumDataset:
     """
     def __init__(self, csv_file: str, max_samples: int = MIXED_BUFFER_SIZE):
         tqdm.write(f"  Caricamento curriculum dataset da {csv_file}...")
-        df = pd.read_csv(csv_file).dropna(subset=["FEN", "Evaluation", "Move"])
+        df = pd.read_csv(csv_file, usecols=["FEN", "Moves", "Themes"])
         if len(df) > max_samples * 4:
             df = df.sample(n=max_samples * 4, random_state=42)
         self.df       = df.reset_index(drop=True)
