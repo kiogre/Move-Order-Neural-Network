@@ -9,9 +9,9 @@ int main() {
     Ort::SessionOptions session_options;
 
     // Abilita l'Execution Provider CUDA (GPU 0)
-    //OrtCUDAProviderOptions cuda_options;
-    //cuda_options.device_id = 0;
-    //session_options.AppendExecutionProvider_CUDA(cuda_options);
+    OrtCUDAProviderOptions cuda_options;
+    cuda_options.device_id = 0;
+    session_options.AppendExecutionProvider_CUDA(cuda_options);
 
     // Carica lo STESSO file .onnx generato prima
     Ort::Session session(env, "jellyfish_pointer.onnx", session_options);
