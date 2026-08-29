@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Definisci il percorso di ONNX Runtime estratto
-set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-linux-x64-1.17.1")
+set(ONNXRUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/onnxruntime-linux-x64-gpu-1.17.1")
 
 # Specifica dove trovare gli header (.h) e le librerie (.so)
 include_directories(${ONNXRUNTIME_DIR}/include)
@@ -18,6 +18,12 @@ add_executable(test test.cpp)
 target_link_libraries(test PRIVATE onnxruntime)
 
 # Imposta RPATH per permettere all'eseguibile di trovare la libreria .so in esecuzione senza usare LD_LIBRARY_PATH
+set_target_properties(test PROPERTIES
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib"
+)
+
+# Imposta l'RPATH per consentire all'eseguibile di trovare libonnxruntime_providers_shared.so
 set_target_properties(test PROPERTIES
     BUILD_WITH_INSTALL_RPATH TRUE
     INSTALL_RPATH "${ONNXRUNTIME_DIR}/lib"

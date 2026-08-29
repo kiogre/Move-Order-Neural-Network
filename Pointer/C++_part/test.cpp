@@ -1,11 +1,19 @@
 #include <iostream>
 #include <vector>
 #include <onnxruntime_cxx_api.h>
+#include <onnxruntime_c_api.h>
 
 int main() {
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "JellyFishInference");
+
+    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "JellyFishGPU");
     Ort::SessionOptions session_options;
 
+    // Abilita l'Execution Provider CUDA (GPU 0)
+    //OrtCUDAProviderOptions cuda_options;
+    //cuda_options.device_id = 0;
+    //session_options.AppendExecutionProvider_CUDA(cuda_options);
+
+    // Carica lo STESSO file .onnx generato prima
     Ort::Session session(env, "jellyfish_pointer.onnx", session_options);
     Ort::MemoryInfo memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
 
